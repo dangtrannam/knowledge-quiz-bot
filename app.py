@@ -3,6 +3,7 @@ import os
 import json
 from datetime import datetime
 from quiz_bot import QuizBot
+from chat_bot import ChatBot
 from knowledge_manager import KnowledgeManager
 from utils import setup_page_config, load_css
 
@@ -13,14 +14,22 @@ def main():
     # Initialize session state
     if 'quiz_bot' not in st.session_state:
         st.session_state.quiz_bot = None
+    if 'chat_bot' not in st.session_state:
+        st.session_state.chat_bot = None
     if 'knowledge_manager' not in st.session_state:
         st.session_state.knowledge_manager = KnowledgeManager()
     if 'quiz_active' not in st.session_state:
         st.session_state.quiz_active = False
+    if 'chat_active' not in st.session_state:
+        st.session_state.chat_active = False
     if 'current_question' not in st.session_state:
         st.session_state.current_question = None
     if 'score' not in st.session_state:
         st.session_state.score = {'correct': 0, 'total': 0}
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []
+    if 'selected_documents' not in st.session_state:
+        st.session_state.selected_documents = ['all']
     
     # Header
     st.title("🧠 Knowledge Quiz Bot")
@@ -36,8 +45,18 @@ def main():
             if preload_status['is_preloaded']:
                 st.success("🚀 Preloaded from previous session")
                 st.caption(f"📁 {preload_status['processed_files_count']} files ready")
+                # Initialize bots if not already done
+                if not st.session_state.quiz_bot and preload_status['vectorstore_available']:
+                    st.session_state.quiz_bot = QuizBot(st.session_state.knowledge_manager)
+                if not st.session_state.chat_bot and preload_status['vectorstore_available']:
+                    st.session_state.chat_bot = ChatBot(st.session_state.knowledge_manager)
             elif preload_status['processed_files_count'] > 0:
                 st.info("📚 Knowledge base available")
+                # Initialize bots if not already done
+                if not st.session_state.quiz_bot and preload_status['vectorstore_available']:
+                    st.session_state.quiz_bot = QuizBot(st.session_state.knowledge_manager)
+                if not st.session_state.chat_bot and preload_status['vectorstore_available']:
+                    st.session_state.chat_bot = ChatBot(st.session_state.knowledge_manager)
         
         # API Key input
         api_key = st.text_input(
@@ -100,6 +119,7 @@ def main():
                                 
                                 if result['success']:
                                     st.session_state.quiz_bot = QuizBot(st.session_state.knowledge_manager)
+                                    st.session_state.chat_bot = ChatBot(st.session_state.knowledge_manager)
                                     
                                     # Show detailed results
                                     if result['new_files'] > 0:
@@ -120,41 +140,94 @@ def main():
                                 st.error(f"Error processing documents: {str(e)}")
                                 st.info("💡 Try uploading one file at a time or check if the file is corrupted.")
             
-            # Quiz configuration
-            if st.session_state.quiz_bot:
-                st.subheader("🎯 Quiz Settings")
+            # Mode selection
+            if st.session_state.quiz_bot or st.session_state.chat_bot:
+                st.subheader("🎮 Choose Your Mode")
                 
-                quiz_type = st.selectbox(
-                    "Quiz Type",
-                    ["Multiple Choice", "True/False", "Short Answer", "Mixed"]
+                mode = st.radio(
+                    "What would you like to do?",
+                    ["💬 Chat with Documents", "🎯 Take a Quiz"],
+                    horizontal=True
                 )
                 
-                difficulty = st.selectbox(
-                    "Difficulty Level",
-                    ["Easy", "Medium", "Hard", "Adaptive"]
-                )
+                if mode == "💬 Chat with Documents":
+                    # Chat configuration
+                    st.subheader("💬 Chat Settings")
+                    
+                    # Document selection
+                    if st.session_state.chat_bot:
+                        available_docs = st.session_state.chat_bot.get_available_documents()
+                        
+                        if available_docs:
+                            doc_options = {doc['name']: doc['id'] for doc in available_docs}
+                            
+                            selected_doc_names = st.multiselect(
+                                "Select documents to chat with:",
+                                options=list(doc_options.keys()),
+                                default=[available_docs[0]['name']],  # Default to "All Documents"
+                                help="Choose specific documents or select 'All Documents' to chat with everything"
+                            )
+                            
+                            if selected_doc_names:
+                                st.session_state.selected_documents = [doc_options[name] for name in selected_doc_names]
+                                
+                                # Show selected documents info
+                                with st.expander("📋 Selected Documents Details"):
+                                    for doc in available_docs:
+                                        if doc['id'] in st.session_state.selected_documents:
+                                            st.write(f"**{doc['name']}**")
+                                            st.caption(doc['description'])
+                    
+                    # Chat controls
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("💬 Start Chat", type="primary"):
+                            st.session_state.chat_active = True
+                            st.session_state.quiz_active = False
+                            st.rerun()
+                    
+                    with col2:
+                        if st.button("🔄 Clear Chat History"):
+                            st.session_state.chat_history = []
+                            st.session_state.chat_active = False
+                            st.rerun()
                 
-                num_questions = st.slider(
-                    "Number of Questions",
-                    min_value=5,
-                    max_value=50,
-                    value=10
-                )
-                
-                # Quiz controls
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("🚀 Start Quiz", type="primary"):
-                        st.session_state.quiz_active = True
-                        st.session_state.score = {'correct': 0, 'total': 0}
-                        st.rerun()
-                
-                with col2:
-                    if st.button("🔄 Reset Quiz"):
-                        st.session_state.quiz_active = False
-                        st.session_state.current_question = None
-                        st.session_state.score = {'correct': 0, 'total': 0}
-                        st.rerun()
+                else:  # Quiz mode
+                    # Quiz configuration
+                    st.subheader("🎯 Quiz Settings")
+                    
+                    quiz_type = st.selectbox(
+                        "Quiz Type",
+                        ["Multiple Choice", "True/False", "Short Answer", "Mixed"]
+                    )
+                    
+                    difficulty = st.selectbox(
+                        "Difficulty Level",
+                        ["Easy", "Medium", "Hard", "Adaptive"]
+                    )
+                    
+                    num_questions = st.slider(
+                        "Number of Questions",
+                        min_value=5,
+                        max_value=50,
+                        value=10
+                    )
+                    
+                    # Quiz controls
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("🚀 Start Quiz", type="primary"):
+                            st.session_state.quiz_active = True
+                            st.session_state.chat_active = False
+                            st.session_state.score = {'correct': 0, 'total': 0}
+                            st.rerun()
+                    
+                    with col2:
+                        if st.button("🔄 Reset Quiz"):
+                            st.session_state.quiz_active = False
+                            st.session_state.current_question = None
+                            st.session_state.score = {'correct': 0, 'total': 0}
+                            st.rerun()
         
         else:
             st.warning("⚠️ Please enter your OpenAI API key to get started")
@@ -162,8 +235,10 @@ def main():
     # Main content area
     if not api_key:
         show_welcome_screen()
-    elif not st.session_state.quiz_bot:
+    elif not st.session_state.quiz_bot and not st.session_state.chat_bot:
         show_upload_prompt()
+    elif st.session_state.chat_active:
+        show_chat_interface()
     elif st.session_state.quiz_active:
         show_quiz_interface(quiz_type, difficulty, num_questions)
     else:
@@ -173,21 +248,28 @@ def show_welcome_screen():
     st.markdown("""
     ## Welcome to Knowledge Quiz Bot! 🎉
     
-    This AI-powered quiz bot works just like Google's NotebookLM, but focuses on testing your knowledge through interactive quizzes.
+    This AI-powered platform works just like Google's NotebookLM, offering both interactive chat and knowledge testing features.
     
     ### How it works:
     1. **📁 Upload your documents** - PDFs, text files, or Word docs
     2. **🧠 AI analyzes the content** - Extracts key concepts and facts
-    3. **❓ Generate smart questions** - Creates relevant quiz questions
-    4. **🎯 Test your knowledge** - Interactive quiz with explanations
-    5. **📊 Track your progress** - See how well you understand the material
+    3. **💬 Chat or Quiz** - Choose your learning mode
+    4. **🎯 Get smart responses** - AI answers based on your documents
+    5. **📊 Track your progress** - Monitor your learning journey
     
     ### Features:
-    - 🎭 **Multiple question types** (Multiple choice, True/False, Short answer)
-    - 🎚️ **Adaptive difficulty** - Adjusts based on your performance
-    - 💡 **Detailed explanations** - Learn from both correct and incorrect answers  
-    - 📈 **Progress tracking** - Monitor your learning journey
-    - 🔍 **Source citations** - See exactly where information comes from
+    
+    #### 💬 **Chat Mode**
+    - **Interactive conversations** with your documents
+    - **Document selection** - Chat with specific files or all documents
+    - **Contextual responses** - AI answers based only on your content
+    - **Source citations** - See exactly where information comes from
+    
+    #### 🎯 **Quiz Mode**
+    - **Multiple question types** (Multiple choice, True/False, Short answer)
+    - **Adaptive difficulty** - Adjusts based on your performance
+    - **Detailed explanations** - Learn from both correct and incorrect answers  
+    - **Progress tracking** - Monitor your learning journey
     
     **Get started by entering your OpenAI API key in the sidebar!**
     """)
@@ -216,7 +298,8 @@ def show_upload_prompt():
             sample_content = create_sample_content()
             st.session_state.knowledge_manager.process_text_content(sample_content)
             st.session_state.quiz_bot = QuizBot(st.session_state.knowledge_manager)
-            st.success("Demo content loaded! Ready to quiz!")
+            st.session_state.chat_bot = ChatBot(st.session_state.knowledge_manager)
+            st.success("Demo content loaded! Ready to chat or quiz!")
             st.rerun()
 
 def show_quiz_interface(quiz_type, difficulty, num_questions):
@@ -460,6 +543,149 @@ def show_knowledge_base_info():
     
     else:
         st.info("No knowledge base loaded yet.")
+
+def show_chat_interface():
+    st.markdown("## 💬 Chat with Your Documents")
+    
+    if not st.session_state.chat_bot:
+        st.error("Chat bot not initialized. Please upload documents first.")
+        return
+    
+    # Show selected documents info
+    if st.session_state.selected_documents:
+        if 'all' in st.session_state.selected_documents:
+            st.info("💬 Chatting with **All Documents**")
+        else:
+            doc_names = []
+            processed_files = st.session_state.knowledge_manager.get_processed_files_details()
+            for doc_id in st.session_state.selected_documents:
+                for file_info in processed_files:
+                    if file_info['file_hash'] == doc_id:
+                        doc_names.append(file_info['filename'])
+                        break
+            if doc_names:
+                st.info(f"💬 Chatting with: **{', '.join(doc_names)}**")
+    
+    # Chat history display
+    chat_container = st.container()
+    
+    with chat_container:
+        if st.session_state.chat_history:
+            for i, message in enumerate(st.session_state.chat_history):
+                if message['role'] == 'user':
+                    with st.chat_message("user"):
+                        st.markdown(message['content'])
+                else:
+                    with st.chat_message("assistant"):
+                        st.markdown(message['content'])
+                        
+                        # Show sources if available
+                        if 'sources' in message and message['sources']:
+                            with st.expander("📚 Sources"):
+                                for source in message['sources']:
+                                    st.caption(f"• {source}")
+        else:
+            # Show conversation starters
+            st.markdown("### 🚀 Get Started")
+            st.markdown("Ask me anything about your documents! Here are some suggestions:")
+            
+            starters = st.session_state.chat_bot.get_conversation_starters(st.session_state.selected_documents)
+            
+            cols = st.columns(2)
+            for i, starter in enumerate(starters):
+                with cols[i % 2]:
+                    if st.button(starter, key=f"starter_{i}", use_container_width=True):
+                        # Add user message to history
+                        st.session_state.chat_history.append({
+                            'role': 'user',
+                            'content': starter
+                        })
+                        
+                        # Generate response
+                        with st.spinner("Thinking..."):
+                            result = st.session_state.chat_bot.generate_response(
+                                starter, 
+                                st.session_state.selected_documents,
+                                st.session_state.chat_history[:-1]  # Exclude the just-added message
+                            )
+                            
+                            if result['success']:
+                                # Add assistant response to history
+                                response_data = {
+                                    'role': 'assistant',
+                                    'content': result['response']
+                                }
+                                if 'sources' in result:
+                                    response_data['sources'] = result['sources']
+                                
+                                st.session_state.chat_history.append(response_data)
+                            else:
+                                st.session_state.chat_history.append({
+                                    'role': 'assistant',
+                                    'content': f"❌ {result['error']}"
+                                })
+                        
+                        st.rerun()
+    
+    # Chat input
+    user_input = st.chat_input("Ask me anything about your documents...")
+    
+    if user_input:
+        # Add user message to history
+        st.session_state.chat_history.append({
+            'role': 'user',
+            'content': user_input
+        })
+        
+        # Generate response
+        with st.spinner("Thinking..."):
+            result = st.session_state.chat_bot.generate_response(
+                user_input, 
+                st.session_state.selected_documents,
+                st.session_state.chat_history[:-1]  # Exclude the just-added message
+            )
+            
+            if result['success']:
+                # Add assistant response to history
+                response_data = {
+                    'role': 'assistant',
+                    'content': result['response']
+                }
+                if 'sources' in result:
+                    response_data['sources'] = result['sources']
+                
+                st.session_state.chat_history.append(response_data)
+            else:
+                st.session_state.chat_history.append({
+                    'role': 'assistant',
+                    'content': f"❌ {result['error']}"
+                })
+        
+        st.rerun()
+    
+    # Chat controls in sidebar
+    with st.sidebar:
+        st.markdown("---")
+        st.subheader("💬 Chat Controls")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 New Chat"):
+                st.session_state.chat_history = []
+                st.rerun()
+        
+        with col2:
+            if st.button("📊 Back to Overview"):
+                st.session_state.chat_active = False
+                st.rerun()
+        
+        # Show chat stats
+        if st.session_state.chat_history:
+            st.markdown("### 📈 Chat Stats")
+            user_messages = len([m for m in st.session_state.chat_history if m['role'] == 'user'])
+            assistant_messages = len([m for m in st.session_state.chat_history if m['role'] == 'assistant'])
+            st.metric("Messages", f"{user_messages + assistant_messages}")
+            st.metric("Questions Asked", user_messages)
 
 def create_sample_content():
     return """

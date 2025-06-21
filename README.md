@@ -2,7 +2,7 @@
 
 > Your AI-powered learning companion, inspired by Google's NotebookLM
 
-A sophisticated quiz chatbot that transforms your documents into interactive learning experiences. Upload PDFs, text files, or Word documents, and let AI generate personalized quizzes to test and reinforce your knowledge.
+A sophisticated AI platform that transforms your documents into interactive learning experiences. Upload PDFs, text files, or Word documents, then either chat with your content or take personalized quizzes to test and reinforce your knowledge.
 
 ## 🌟 Features
 
@@ -11,6 +11,12 @@ A sophisticated quiz chatbot that transforms your documents into interactive lea
 - **Intelligent chunking**: Optimized text segmentation
 - **Vector embeddings**: Semantic search capabilities
 - **Source citations**: Track information back to original documents
+
+### 💬 **Interactive Chat Interface**
+- **Document selection**: Chat with specific files or all documents
+- **Contextual responses**: AI answers based only on your uploaded content
+- **Source citations**: See exactly which documents inform each response
+- **Conversation starters**: Get helpful suggestions to begin your chat
 
 ### 🎯 **Adaptive Quiz Generation**
 - **Multiple question types**: Multiple choice, True/False, Short answer
@@ -70,22 +76,37 @@ A sophisticated quiz chatbot that transforms your documents into interactive lea
 
 ### 3. **Build Knowledge Base**
 - Click "📖 Build Knowledge Base" to process your documents
-- AI will analyze and index your content for quiz generation
+- AI will analyze and index your content for both chat and quiz features
 
-### 4. **Configure Quiz Settings**
+### 4. **Choose Your Mode**
+- **💬 Chat Mode**: Have interactive conversations with your documents
+- **🎯 Quiz Mode**: Test your knowledge with AI-generated questions
+
+#### For Chat Mode:
+### 5a. **Select Documents**
+- Choose specific documents or select "All Documents" to chat with everything
+- See detailed information about your selected content
+
+### 6a. **Start Chatting**
+- Click "💬 Start Chat" to begin your conversation
+- Ask questions about your documents and get contextual responses
+- Use conversation starters for inspiration
+
+#### For Quiz Mode:
+### 5b. **Configure Quiz Settings**
 - **Quiz Type**: Choose from Multiple Choice, True/False, Short Answer, or Mixed
 - **Difficulty**: Select Easy, Medium, Hard, or Adaptive
 - **Number of Questions**: Set anywhere from 5 to 50 questions
 
-### 5. **Take the Quiz**
+### 6b. **Take the Quiz**
 - Click "🚀 Start Quiz" to begin
 - Answer questions and receive immediate feedback
 - View explanations and source citations for each answer
 
-### 6. **Review Results**
-- See your final score and grade
+### 7. **Review Results**
+- See your final score and grade (Quiz Mode)
 - Get personalized feedback on your performance
-- Option to retake quiz or try different settings
+- Option to retake quiz or switch to chat mode
 
 ## 🎮 Try the Demo
 
@@ -103,6 +124,7 @@ The project follows a modular architecture inspired by modern AI applications:
 knowledge-quiz-bot/
 ├── app.py                 # Main Streamlit application
 ├── quiz_bot.py           # Core quiz generation logic
+├── chat_bot.py           # Interactive chat functionality
 ├── knowledge_manager.py   # Document processing and vector storage
 ├── utils.py              # Helper functions and UI components
 ├── requirements.txt      # Python dependencies
@@ -113,13 +135,14 @@ knowledge-quiz-bot/
 
 - **KnowledgeManager**: Handles document ingestion, processing, and vector database management
 - **QuizBot**: Generates questions using LangChain and OpenAI, manages difficulty adaptation
+- **ChatBot**: Provides interactive chat interface with document selection and contextual responses
 - **Streamlit UI**: Provides an intuitive interface similar to NotebookLM's design
 
 ## 🛠️ Technical Details
 
 ### AI Models Used
-- **OpenAI GPT-3.5-turbo**: For question generation and short answer evaluation
-- **OpenAI Embeddings**: For semantic document search and retrieval
+- **OpenAI GPT-4o-mini**: For question generation and short answer evaluation
+- **all-MiniLM-L6-v2**: For semantic document search and retrieval
 - **ChromaDB**: Vector database for efficient similarity search
 
 ### Question Generation Process

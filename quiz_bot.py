@@ -1,3 +1,4 @@
+import os
 import openai
 import json
 import random
@@ -35,30 +36,65 @@ class QuizBot:
     
     def __init__(self, knowledge_manager):
         self.knowledge_manager = knowledge_manager
-        
-        # Log initialization
-        logging.info("Initializing QuizBot with GPT-4o-mini model")
-        
-        self.llm = ChatOpenAI(
-            model="gpt-4o-mini",
-            temperature=0.7,
-            max_tokens=1000
-        )
+        self.llm = None
         self.question_history = []
         self.difficulty_adjustment = 0
         
-        # Test the LLM connection
+        # Log initialization
+        logging.info("Initializing QuizBot with GPT-4o-mini model (lazy initialization)")
+    
+    def _get_llm(self):
+        """Get or initialize the LLM client (lazy initialization)"""
         try:
-            test_response = self.llm.invoke("Test connection")
-            logging.info(f"LLM connection successful: {test_response}")
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                logging.warning("OpenAI API key not found")
+                return None
+                
+            # Initialize LLM if not already done
+            if self.llm is None:
+                logging.info("Initializing ChatOpenAI with GPT-4o-mini model")
+                self.llm = ChatOpenAI(
+                    model="gpt-4o-mini",
+                    api_key=api_key,
+                    temperature=0.7,
+                    max_tokens=1000
+                )
+                
+                # Test the LLM connection
+                try:
+                    test_response = self.llm.invoke("Test connection")
+                    logging.info(f"LLM connection successful: {test_response}")
+                except Exception as e:
+                    logging.error(f"LLM connection failed: {e}")
+                    self.llm = None
+                    return None
+            
+            return self.llm
         except Exception as e:
-            logging.error(f"LLM connection failed: {e}")
+            logging.error(f"Failed to initialize LLM: {e}")
+            self.llm = None
+            return None
         
     def generate_question(self, question_type: str = "multiple_choice", difficulty: str = "medium") -> Dict[str, Any]:
         """Generate a quiz question based on the knowledge base"""
         logging.info(f"Starting question generation - Type: {question_type}, Difficulty: {difficulty}")
         
         try:
+            # Check if LLM is available
+            llm = self._get_llm()
+            if not llm:
+                logging.error("LLM not available - API key missing or invalid")
+                return {
+                    "type": question_type,
+                    "question": "API Key Error: Please enter a valid OpenAI API key in the sidebar",
+                    "options": ["A) Check your API key", "B) Restart the application", "C) Contact support", "D) Try again later"],
+                    "correct_answer": "A) Check your API key",
+                    "explanation": "You need to enter a valid OpenAI API key to generate quiz questions.",
+                    "source": "System error",
+                    "difficulty": difficulty
+                }
+            
             # Get relevant context from knowledge base
             context = self.knowledge_manager.get_random_context()
             
@@ -135,7 +171,12 @@ class QuizBot:
             """
         )
         
-        chain = LLMChain(llm=self.llm, prompt=prompt_template)
+        # Get LLM instance
+        llm = self._get_llm()
+        if not llm:
+            return self._generate_fallback_question()
+            
+        chain = LLMChain(llm=llm, prompt=prompt_template)
         
         # Log the request details
         logging.info(f"Generating multiple choice question - Difficulty: {difficulty}")
@@ -201,7 +242,12 @@ class QuizBot:
             """
         )
         
-        chain = LLMChain(llm=self.llm, prompt=prompt_template)
+        # Get LLM instance
+        llm = self._get_llm()
+        if not llm:
+            return self._generate_fallback_question()
+            
+        chain = LLMChain(llm=llm, prompt=prompt_template)
         
         # Log the request details
         logging.info(f"Generating true/false question - Difficulty: {difficulty}")
@@ -263,7 +309,12 @@ class QuizBot:
             """
         )
         
-        chain = LLMChain(llm=self.llm, prompt=prompt_template)
+        # Get LLM instance
+        llm = self._get_llm()
+        if not llm:
+            return self._generate_fallback_question()
+            
+        chain = LLMChain(llm=llm, prompt=prompt_template)
         
         # Log the request details
         logging.info(f"Generating short answer question - Difficulty: {difficulty}")
@@ -331,7 +382,13 @@ class QuizBot:
             """
         )
         
-        chain = LLMChain(llm=self.llm, prompt=prompt_template)
+        # Get LLM instance
+        llm = self._get_llm()
+        if not llm:
+            # If LLM is not available, do basic string matching as fallback
+            return user_answer.lower() in correct_answer.lower() or correct_answer.lower() in user_answer.lower()
+            
+        chain = LLMChain(llm=llm, prompt=prompt_template)
         response = chain.run(
             question=question_data.get('question', ''),
             user_answer=user_answer,

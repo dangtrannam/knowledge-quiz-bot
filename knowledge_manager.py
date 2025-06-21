@@ -1,7 +1,10 @@
 import os
 import tempfile
 import hashlib
+import json
+import pickle
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 import streamlit as st
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -12,36 +15,157 @@ import random
 import logging
 
 class KnowledgeManager:
-    def __init__(self):
+    def __init__(self, persist_directory: str = "./chroma_db", metadata_file: str = "./processed_files.json"):
         self.documents = []
         self.vectorstore = None
+        self.persist_directory = persist_directory
+        self.metadata_file = metadata_file
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
             length_function=len,
         )
         self.embeddings = None
-        self.processed_files = set()
+        self.processed_files = {}  # Changed to dict to store metadata
+        self.is_preloaded = False
         
+        # Initialize embeddings early
+        self._initialize_embeddings()
+        
+        # Load existing metadata and preload if available
+        self._load_metadata()
+        self._preload_existing_documents()
+    
+    def _initialize_embeddings(self):
+        """Initialize embeddings model early"""
+        try:
+            if not self.embeddings:
+                logging.info("Initializing HuggingFace embeddings...")
+                self.embeddings = HuggingFaceEmbeddings(
+                    model_name="sentence-transformers/all-MiniLM-L6-v2",
+                    model_kwargs={'device': 'cpu'},
+                    encode_kwargs={'normalize_embeddings': True}
+                )
+                logging.info("Embeddings initialized successfully")
+        except Exception as e:
+            logging.error(f"Failed to initialize embeddings: {e}")
+    
+    def _load_metadata(self):
+        """Load metadata about processed files"""
+        try:
+            if os.path.exists(self.metadata_file):
+                with open(self.metadata_file, 'r', encoding='utf-8') as f:
+                    self.processed_files = json.load(f)
+                logging.info(f"Loaded metadata for {len(self.processed_files)} processed files")
+            else:
+                self.processed_files = {}
+                logging.info("No existing metadata found, starting fresh")
+        except Exception as e:
+            logging.error(f"Error loading metadata: {e}")
+            self.processed_files = {}
+    
+    def _save_metadata(self):
+        """Save metadata about processed files"""
+        try:
+            os.makedirs(os.path.dirname(self.metadata_file) if os.path.dirname(self.metadata_file) else '.', exist_ok=True)
+            with open(self.metadata_file, 'w', encoding='utf-8') as f:
+                json.dump(self.processed_files, f, indent=2, ensure_ascii=False)
+            logging.info(f"Saved metadata for {len(self.processed_files)} processed files")
+        except Exception as e:
+            logging.error(f"Error saving metadata: {e}")
+    
+    def _preload_existing_documents(self):
+        """Preload existing vector database if available"""
+        try:
+            if os.path.exists(self.persist_directory) and self.embeddings:
+                logging.info("Attempting to preload existing vector database...")
+                
+                # Try to load existing vectorstore
+                self.vectorstore = Chroma(
+                    persist_directory=self.persist_directory,
+                    embedding_function=self.embeddings
+                )
+                
+                # Check if vectorstore has documents
+                try:
+                    # Try to get a sample to verify the vectorstore works
+                    sample_results = self.vectorstore.similarity_search("test", k=1)
+                    if sample_results:
+                        logging.info(f"Successfully preloaded vector database with documents")
+                        self.is_preloaded = True
+                        
+                        # Reconstruct documents list from metadata
+                        self._reconstruct_documents_from_metadata()
+                    else:
+                        logging.info("Vector database exists but appears empty")
+                except Exception as e:
+                    logging.warning(f"Vector database exists but may be corrupted: {e}")
+                    self.vectorstore = None
+                    
+        except Exception as e:
+            logging.error(f"Error preloading documents: {e}")
+            self.vectorstore = None
+            self.is_preloaded = False
+    
+    def _reconstruct_documents_from_metadata(self):
+        """Reconstruct documents list from saved metadata"""
+        try:
+            # This is a simplified reconstruction - in a full implementation,
+            # you might want to save document content separately
+            self.documents = []
+            
+            # For now, we'll rely on the vectorstore for content
+            # and use metadata for file tracking
+            logging.info(f"Reconstructed knowledge base from {len(self.processed_files)} processed files")
+            
+        except Exception as e:
+            logging.error(f"Error reconstructing documents: {e}")
+    
+    def get_preload_status(self) -> Dict[str, Any]:
+        """Get information about preloaded content"""
+        return {
+            'is_preloaded': self.is_preloaded,
+            'processed_files_count': len(self.processed_files),
+            'processed_files': list(self.processed_files.keys()) if self.processed_files else [],
+            'vectorstore_available': self.vectorstore is not None,
+            'embeddings_ready': self.embeddings is not None
+        }
+
     def process_documents(self, uploaded_files):
         """Process uploaded documents and build vector database"""
         try:
-            # Initialize embeddings if not already done
-            if not self.embeddings:
-                self.embeddings = HuggingFaceEmbeddings(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2"
-                )
-            
-            all_texts = []
+            new_files = []
+            skipped_files = []
             
             for uploaded_file in uploaded_files:
                 # Check if file was already processed
                 file_hash = self._get_file_hash(uploaded_file)
+                file_name = uploaded_file.name
+                
                 if file_hash in self.processed_files:
+                    skipped_files.append(file_name)
+                    logging.info(f"Skipping already processed file: {file_name}")
                     continue
                 
+                new_files.append((uploaded_file, file_hash))
+            
+            if not new_files:
+                logging.info("No new files to process")
+                return {
+                    'success': True,
+                    'new_files': 0,
+                    'skipped_files': len(skipped_files),
+                    'skipped_list': skipped_files,
+                    'message': f"All {len(skipped_files)} files were already processed"
+                }
+            
+            all_texts = []
+            processed_count = 0
+            
+            for uploaded_file, file_hash in new_files:
                 # Save uploaded file temporarily
-                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp_file:
+                file_extension = uploaded_file.name.split('.')[-1]
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as tmp_file:
                     tmp_file.write(uploaded_file.getbuffer())
                     tmp_file_path = tmp_file.name
                 
@@ -53,17 +177,35 @@ class KnowledgeManager:
                         # Split documents into chunks
                         texts = self.text_splitter.split_documents(documents)
                         
-                        # Add metadata
+                        # Add enhanced metadata
+                        current_time = datetime.now().isoformat()
                         for text in texts:
-                            text.metadata['source_file'] = uploaded_file.name
-                            text.metadata['file_hash'] = file_hash
+                            text.metadata.update({
+                                'source_file': uploaded_file.name,
+                                'file_hash': file_hash,
+                                'processed_date': current_time,
+                                'chunk_index': len(all_texts) + texts.index(text),
+                                'file_size': len(uploaded_file.getbuffer())
+                            })
                         
                         all_texts.extend(texts)
-                        self.processed_files.add(file_hash)
+                        
+                        # Update processed files metadata
+                        self.processed_files[file_hash] = {
+                            'filename': uploaded_file.name,
+                            'processed_date': current_time,
+                            'file_size': len(uploaded_file.getbuffer()),
+                            'chunk_count': len(texts),
+                            'file_type': file_extension.lower()
+                        }
+                        
+                        processed_count += 1
+                        logging.info(f"Processed file: {uploaded_file.name} ({len(texts)} chunks)")
                         
                 finally:
                     # Clean up temporary file
-                    os.unlink(tmp_file_path)
+                    if os.path.exists(tmp_file_path):
+                        os.unlink(tmp_file_path)
             
             if all_texts:
                 # Create or update vector database
@@ -71,11 +213,13 @@ class KnowledgeManager:
                     self.vectorstore = Chroma.from_documents(
                         documents=all_texts,
                         embedding=self.embeddings,
-                        persist_directory="./chroma_db"
+                        persist_directory=self.persist_directory
                     )
+                    logging.info("Created new vector database")
                 else:
                     # Add new documents to existing vectorstore
                     self.vectorstore.add_documents(all_texts)
+                    logging.info(f"Added {len(all_texts)} new chunks to existing vector database")
                 
                 # Persist the database
                 self.vectorstore.persist()
@@ -83,13 +227,33 @@ class KnowledgeManager:
                 # Update document list
                 self.documents.extend(all_texts)
                 
-                return True
+                # Save metadata
+                self._save_metadata()
+                
+                return {
+                    'success': True,
+                    'new_files': processed_count,
+                    'skipped_files': len(skipped_files),
+                    'skipped_list': skipped_files,
+                    'total_chunks': len(all_texts),
+                    'message': f"Successfully processed {processed_count} new files ({len(all_texts)} chunks)"
+                }
+            
+            return {
+                'success': False,
+                'new_files': 0,
+                'skipped_files': len(skipped_files),
+                'skipped_list': skipped_files,
+                'message': "No documents could be processed"
+            }
             
         except Exception as e:
             logging.error(f"Error processing documents: {str(e)}")
-            raise e
-        
-        return False
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f"Error processing documents: {str(e)}"
+            }
     
     def process_text_content(self, text_content: str, source_name: str = "Sample Content"):
         """Process raw text content for demo purposes"""
@@ -290,4 +454,78 @@ class KnowledgeManager:
             elif 'source' in doc.metadata:
                 sources.add(doc.metadata['source'])
         
-        return sorted(list(sources)) 
+        return sorted(list(sources))
+    
+    def get_processed_files_details(self) -> List[Dict[str, Any]]:
+        """Get detailed information about all processed files"""
+        files_info = []
+        for file_hash, metadata in self.processed_files.items():
+            files_info.append({
+                'file_hash': file_hash,
+                'filename': metadata.get('filename', 'Unknown'),
+                'processed_date': metadata.get('processed_date', 'Unknown'),
+                'file_size': metadata.get('file_size', 0),
+                'file_size_mb': round(metadata.get('file_size', 0) / (1024 * 1024), 2),
+                'chunk_count': metadata.get('chunk_count', 0),
+                'file_type': metadata.get('file_type', 'unknown')
+            })
+        
+        # Sort by processed date (most recent first)
+        files_info.sort(key=lambda x: x['processed_date'], reverse=True)
+        return files_info
+    
+    def remove_processed_file(self, file_hash: str) -> bool:
+        """Remove a processed file from the knowledge base"""
+        try:
+            if file_hash not in self.processed_files:
+                return False
+            
+            # Remove from processed files metadata
+            filename = self.processed_files[file_hash].get('filename', 'Unknown')
+            del self.processed_files[file_hash]
+            
+            # Remove documents from memory (this is a simplified approach)
+            # In a full implementation, you'd need to rebuild the vectorstore
+            self.documents = [doc for doc in self.documents 
+                            if doc.metadata.get('file_hash') != file_hash]
+            
+            # Save updated metadata
+            self._save_metadata()
+            
+            logging.info(f"Removed processed file: {filename}")
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error removing processed file: {e}")
+            return False
+    
+    def rebuild_vectorstore(self):
+        """Rebuild the vectorstore from current documents"""
+        try:
+            if not self.documents or not self.embeddings:
+                return False
+            
+            # Clear existing vectorstore
+            if os.path.exists(self.persist_directory):
+                import shutil
+                shutil.rmtree(self.persist_directory)
+            
+            # Recreate vectorstore
+            self.vectorstore = Chroma.from_documents(
+                documents=self.documents,
+                embedding=self.embeddings,
+                persist_directory=self.persist_directory
+            )
+            
+            self.vectorstore.persist()
+            logging.info("Successfully rebuilt vectorstore")
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error rebuilding vectorstore: {e}")
+            return False
+    
+    def is_file_already_processed(self, uploaded_file) -> bool:
+        """Check if a file has already been processed"""
+        file_hash = self._get_file_hash(uploaded_file)
+        return file_hash in self.processed_files 

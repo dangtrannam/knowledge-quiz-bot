@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import json
 from datetime import datetime
 from quiz_bot import QuizBot
 from knowledge_manager import KnowledgeManager
@@ -29,6 +30,15 @@ def main():
     with st.sidebar:
         st.header("📚 Knowledge Base")
         
+        # Show preload status
+        if st.session_state.knowledge_manager:
+            preload_status = st.session_state.knowledge_manager.get_preload_status()
+            if preload_status['is_preloaded']:
+                st.success("🚀 Preloaded from previous session")
+                st.caption(f"📁 {preload_status['processed_files_count']} files ready")
+            elif preload_status['processed_files_count'] > 0:
+                st.info("📚 Knowledge base available")
+        
         # API Key input
         api_key = st.text_input(
             "OpenAI API Key", 
@@ -50,29 +60,62 @@ def main():
             )
             
             if uploaded_files:
-                # Check file sizes
+                # Check file sizes and duplicates
                 large_files = []
+                duplicate_files = []
+                new_files = []
+                
                 for file in uploaded_files:
                     file_size_mb = len(file.getvalue()) / (1024 * 1024)
                     if file_size_mb > 200:
                         large_files.append(f"{file.name} ({file_size_mb:.1f}MB)")
+                    
+                    # Check for duplicates
+                    if st.session_state.knowledge_manager.is_file_already_processed(file):
+                        duplicate_files.append(file.name)
+                    else:
+                        new_files.append(file.name)
                 
                 if large_files:
                     st.warning(f"⚠️ The following files exceed 200MB limit: {', '.join(large_files)}")
                     st.info("Please use smaller files or split large documents into chunks.")
                 else:
-                    # Show file info
+                    # Show file info with duplicate detection
                     with st.expander("📁 Selected Files"):
-                        for file in uploaded_files:
-                            file_size_mb = len(file.getvalue()) / (1024 * 1024)
-                            st.write(f"• {file.name} ({file_size_mb:.1f}MB)")
+                        if new_files:
+                            st.success(f"**New files to process ({len(new_files)}):**")
+                            for file_name in new_files:
+                                file_size_mb = len([f for f in uploaded_files if f.name == file_name][0].getvalue()) / (1024 * 1024)
+                                st.write(f"✅ {file_name} ({file_size_mb:.1f}MB)")
+                        
+                        if duplicate_files:
+                            st.info(f"**Already processed ({len(duplicate_files)}):**")
+                            for file_name in duplicate_files:
+                                st.write(f"🔄 {file_name} (will be skipped)")
                     
                     if st.button("📖 Build Knowledge Base", type="primary"):
                         with st.spinner("Processing documents..."):
                             try:
-                                st.session_state.knowledge_manager.process_documents(uploaded_files)
-                                st.session_state.quiz_bot = QuizBot(st.session_state.knowledge_manager)
-                                st.success(f"✅ Processed {len(uploaded_files)} documents!")
+                                result = st.session_state.knowledge_manager.process_documents(uploaded_files)
+                                
+                                if result['success']:
+                                    st.session_state.quiz_bot = QuizBot(st.session_state.knowledge_manager)
+                                    
+                                    # Show detailed results
+                                    if result['new_files'] > 0:
+                                        st.success(f"✅ {result['message']}")
+                                    
+                                    if result['skipped_files'] > 0:
+                                        st.info(f"ℹ️ Skipped {result['skipped_files']} already processed files: {', '.join(result['skipped_list'])}")
+                                    
+                                    if result['new_files'] == 0 and result['skipped_files'] > 0:
+                                        st.info("All selected files were already in your knowledge base!")
+                                        
+                                else:
+                                    st.error(f"❌ {result['message']}")
+                                    if 'error' in result:
+                                        st.error(f"Details: {result['error']}")
+                                        
                             except Exception as e:
                                 st.error(f"Error processing documents: {str(e)}")
                                 st.info("💡 Try uploading one file at a time or check if the file is corrupted.")
@@ -326,29 +369,97 @@ def show_quiz_results():
             st.rerun()
 
 def show_knowledge_base_info():
-    st.markdown("## 📚 Knowledge Base Ready!")
+    st.markdown("## 📚 Knowledge Base Overview")
     
-    kb_stats = st.session_state.knowledge_manager.get_stats()
+    if st.session_state.knowledge_manager:
+        # Check preload status
+        preload_status = st.session_state.knowledge_manager.get_preload_status()
+        
+        if preload_status['is_preloaded']:
+            st.success("🚀 Knowledge base preloaded from previous session!")
+        
+        stats = st.session_state.knowledge_manager.get_stats()
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Documents", stats['doc_count'])
+        with col2:
+            st.metric("Text Chunks", stats['chunk_count'])
+        with col3:
+            st.metric("Total Characters", f"{stats['total_chars']:,}")
+        with col4:
+            st.metric("Avg Chunk Size", stats['avg_chunk_size'])
+        
+        # Processed files management
+        processed_files = st.session_state.knowledge_manager.get_processed_files_details()
+        if processed_files:
+            st.subheader("📄 Processed Documents")
+            
+            # Show files in a nice table format
+            for file_info in processed_files:
+                with st.expander(f"📁 {file_info['filename']} ({file_info['file_size_mb']} MB)"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**File Type:** {file_info['file_type'].upper()}")
+                        st.write(f"**Processed:** {file_info['processed_date'][:19]}")
+                        st.write(f"**Size:** {file_info['file_size_mb']} MB")
+                    with col2:
+                        st.write(f"**Chunks:** {file_info['chunk_count']}")
+                        st.write(f"**Hash:** {file_info['file_hash'][:12]}...")
+                        
+                        # Remove file button
+                        if st.button(f"🗑️ Remove", key=f"remove_{file_info['file_hash']}", help="Remove this file from knowledge base"):
+                            if st.session_state.knowledge_manager.remove_processed_file(file_info['file_hash']):
+                                st.success(f"Removed {file_info['filename']}")
+                                st.rerun()
+                            else:
+                                st.error("Failed to remove file")
+        
+        # Management actions
+        st.subheader("🔧 Management Actions")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🔄 Rebuild Vector Database"):
+                with st.spinner("Rebuilding..."):
+                    if st.session_state.knowledge_manager.rebuild_vectorstore():
+                        st.success("Vector database rebuilt successfully!")
+                    else:
+                        st.error("Failed to rebuild vector database")
+        
+        with col2:
+            if st.button("🗑️ Clear All Data"):
+                if st.checkbox("I understand this will delete all processed documents", key="confirm_clear"):
+                    st.session_state.knowledge_manager.clear_knowledge_base()
+                    st.session_state.quiz_bot = None
+                    st.success("Knowledge base cleared!")
+                    st.rerun()
+        
+        with col3:
+            if st.button("📊 Export Data"):
+                export_data = st.session_state.knowledge_manager.export_knowledge_base()
+                st.download_button(
+                    "💾 Download Export",
+                    data=json.dumps(export_data, indent=2),
+                    file_name=f"knowledge_base_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
+                )
+        
+        # Ready to quiz section
+        st.markdown("### Ready to start your quiz! 🎯")
+        st.markdown("Configure your quiz settings in the sidebar and click **Start Quiz** when ready.")
+        
+        # Show sample questions preview
+        with st.expander("🔍 Preview Sample Questions"):
+            if st.button("Generate Preview"):
+                sample_q = st.session_state.quiz_bot.generate_question("multiple_choice", "medium")
+                if sample_q:
+                    st.markdown(f"**Sample Question:** {sample_q['question']}")
+                    for i, option in enumerate(sample_q.get('options', []), 1):
+                        st.markdown(f"{i}. {option}")
     
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Documents", kb_stats.get('doc_count', 0))
-    with col2:
-        st.metric("Text Chunks", kb_stats.get('chunk_count', 0))
-    with col3:
-        st.metric("Topics Detected", kb_stats.get('topic_count', 0))
-    
-    st.markdown("### Ready to start your quiz! 🎯")
-    st.markdown("Configure your quiz settings in the sidebar and click **Start Quiz** when ready.")
-    
-    # Show sample questions preview
-    with st.expander("🔍 Preview Sample Questions"):
-        if st.button("Generate Preview"):
-            sample_q = st.session_state.quiz_bot.generate_question("multiple_choice", "medium")
-            if sample_q:
-                st.markdown(f"**Sample Question:** {sample_q['question']}")
-                for i, option in enumerate(sample_q.get('options', []), 1):
-                    st.markdown(f"{i}. {option}")
+    else:
+        st.info("No knowledge base loaded yet.")
 
 def create_sample_content():
     return """

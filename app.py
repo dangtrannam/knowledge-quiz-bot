@@ -1,0 +1,372 @@
+import streamlit as st
+import os
+from datetime import datetime
+from quiz_bot import QuizBot
+from knowledge_manager import KnowledgeManager
+from utils import setup_page_config, load_css
+
+def main():
+    setup_page_config()
+    load_css()
+    
+    # Initialize session state
+    if 'quiz_bot' not in st.session_state:
+        st.session_state.quiz_bot = None
+    if 'knowledge_manager' not in st.session_state:
+        st.session_state.knowledge_manager = KnowledgeManager()
+    if 'quiz_active' not in st.session_state:
+        st.session_state.quiz_active = False
+    if 'current_question' not in st.session_state:
+        st.session_state.current_question = None
+    if 'score' not in st.session_state:
+        st.session_state.score = {'correct': 0, 'total': 0}
+    
+    # Header
+    st.title("🧠 Knowledge Quiz Bot")
+    st.subheader("Your AI-powered learning companion, inspired by NotebookLM")
+    
+    # Sidebar for configuration
+    with st.sidebar:
+        st.header("📚 Knowledge Base")
+        
+        # API Key input
+        api_key = st.text_input(
+            "OpenAI API Key", 
+            type="password",
+            help="Enter your OpenAI API key to power the quiz generation"
+        )
+        
+        if api_key:
+            os.environ["OPENAI_API_KEY"] = api_key
+            
+            # File upload section
+            st.subheader("Upload Documents")
+            uploaded_files = st.file_uploader(
+                "Choose files to build your knowledge base",
+                accept_multiple_files=True,
+                type=['pdf', 'txt', 'docx'],
+                help="Upload PDFs, text files, or Word documents (max 200MB per file)",
+                key="file_uploader"
+            )
+            
+            if uploaded_files:
+                # Check file sizes
+                large_files = []
+                for file in uploaded_files:
+                    file_size_mb = len(file.getvalue()) / (1024 * 1024)
+                    if file_size_mb > 200:
+                        large_files.append(f"{file.name} ({file_size_mb:.1f}MB)")
+                
+                if large_files:
+                    st.warning(f"⚠️ The following files exceed 200MB limit: {', '.join(large_files)}")
+                    st.info("Please use smaller files or split large documents into chunks.")
+                else:
+                    # Show file info
+                    with st.expander("📁 Selected Files"):
+                        for file in uploaded_files:
+                            file_size_mb = len(file.getvalue()) / (1024 * 1024)
+                            st.write(f"• {file.name} ({file_size_mb:.1f}MB)")
+                    
+                    if st.button("📖 Build Knowledge Base", type="primary"):
+                        with st.spinner("Processing documents..."):
+                            try:
+                                st.session_state.knowledge_manager.process_documents(uploaded_files)
+                                st.session_state.quiz_bot = QuizBot(st.session_state.knowledge_manager)
+                                st.success(f"✅ Processed {len(uploaded_files)} documents!")
+                            except Exception as e:
+                                st.error(f"Error processing documents: {str(e)}")
+                                st.info("💡 Try uploading one file at a time or check if the file is corrupted.")
+            
+            # Quiz configuration
+            if st.session_state.quiz_bot:
+                st.subheader("🎯 Quiz Settings")
+                
+                quiz_type = st.selectbox(
+                    "Quiz Type",
+                    ["Multiple Choice", "True/False", "Short Answer", "Mixed"]
+                )
+                
+                difficulty = st.selectbox(
+                    "Difficulty Level",
+                    ["Easy", "Medium", "Hard", "Adaptive"]
+                )
+                
+                num_questions = st.slider(
+                    "Number of Questions",
+                    min_value=5,
+                    max_value=50,
+                    value=10
+                )
+                
+                # Quiz controls
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🚀 Start Quiz", type="primary"):
+                        st.session_state.quiz_active = True
+                        st.session_state.score = {'correct': 0, 'total': 0}
+                        st.rerun()
+                
+                with col2:
+                    if st.button("🔄 Reset Quiz"):
+                        st.session_state.quiz_active = False
+                        st.session_state.current_question = None
+                        st.session_state.score = {'correct': 0, 'total': 0}
+                        st.rerun()
+        
+        else:
+            st.warning("⚠️ Please enter your OpenAI API key to get started")
+    
+    # Main content area
+    if not api_key:
+        show_welcome_screen()
+    elif not st.session_state.quiz_bot:
+        show_upload_prompt()
+    elif st.session_state.quiz_active:
+        show_quiz_interface(quiz_type, difficulty, num_questions)
+    else:
+        show_knowledge_base_info()
+
+def show_welcome_screen():
+    st.markdown("""
+    ## Welcome to Knowledge Quiz Bot! 🎉
+    
+    This AI-powered quiz bot works just like Google's NotebookLM, but focuses on testing your knowledge through interactive quizzes.
+    
+    ### How it works:
+    1. **📁 Upload your documents** - PDFs, text files, or Word docs
+    2. **🧠 AI analyzes the content** - Extracts key concepts and facts
+    3. **❓ Generate smart questions** - Creates relevant quiz questions
+    4. **🎯 Test your knowledge** - Interactive quiz with explanations
+    5. **📊 Track your progress** - See how well you understand the material
+    
+    ### Features:
+    - 🎭 **Multiple question types** (Multiple choice, True/False, Short answer)
+    - 🎚️ **Adaptive difficulty** - Adjusts based on your performance
+    - 💡 **Detailed explanations** - Learn from both correct and incorrect answers  
+    - 📈 **Progress tracking** - Monitor your learning journey
+    - 🔍 **Source citations** - See exactly where information comes from
+    
+    **Get started by entering your OpenAI API key in the sidebar!**
+    """)
+
+def show_upload_prompt():
+    st.markdown("""
+    ## 📚 Ready to Build Your Knowledge Base!
+    
+    Upload some documents to get started. The bot will analyze them and create personalized quiz questions.
+    
+    ### Supported formats:
+    - 📄 **PDF files** - Academic papers, textbooks, reports
+    - 📝 **Text files** - Notes, articles, documentation  
+    - 📋 **Word documents** - Essays, research, summaries
+    
+    ### Tips for best results:
+    - Upload focused, high-quality content
+    - Include diverse topics for varied questions
+    - Ensure text is clear and well-formatted
+    """)
+    
+    # Show example/demo content
+    with st.expander("🎮 Try with Sample Content"):
+        if st.button("Load Demo: AI & Machine Learning"):
+            # Create sample content
+            sample_content = create_sample_content()
+            st.session_state.knowledge_manager.process_text_content(sample_content)
+            st.session_state.quiz_bot = QuizBot(st.session_state.knowledge_manager)
+            st.success("Demo content loaded! Ready to quiz!")
+            st.rerun()
+
+def show_quiz_interface(quiz_type, difficulty, num_questions):
+    # Progress bar
+    progress = st.session_state.score['total'] / num_questions if num_questions > 0 else 0
+    st.progress(progress)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Question", f"{st.session_state.score['total'] + 1}/{num_questions}")
+    with col2:
+        st.metric("Correct", st.session_state.score['correct'])
+    with col3:
+        accuracy = (st.session_state.score['correct'] / st.session_state.score['total'] * 100) if st.session_state.score['total'] > 0 else 0
+        st.metric("Accuracy", f"{accuracy:.1f}%")
+    
+    # Check if quiz is complete
+    if st.session_state.score['total'] >= num_questions:
+        show_quiz_results()
+        return
+    
+    # Generate or show current question
+    if not st.session_state.current_question:
+        with st.spinner("Generating question..."):
+            st.session_state.current_question = st.session_state.quiz_bot.generate_question(
+                question_type=quiz_type.lower().replace(' ', '_'),
+                difficulty=difficulty.lower()
+            )
+    
+    if st.session_state.current_question:
+        question_data = st.session_state.current_question
+        
+        st.markdown(f"### Question {st.session_state.score['total'] + 1}")
+        st.markdown(f"**{question_data['question']}**")
+        
+        # Handle different question types
+        if question_data['type'] == 'multiple_choice':
+            answer = st.radio(
+                "Choose your answer:",
+                question_data['options'],
+                key=f"q_{st.session_state.score['total']}"
+            )
+            
+            if st.button("Submit Answer", type="primary"):
+                handle_answer_submission(answer, question_data)
+        
+        elif question_data['type'] == 'true_false':
+            answer = st.radio(
+                "Choose your answer:",
+                ["True", "False"],
+                key=f"q_{st.session_state.score['total']}"
+            )
+            
+            if st.button("Submit Answer", type="primary"):
+                handle_answer_submission(answer, question_data)
+        
+        elif question_data['type'] == 'short_answer':
+            answer = st.text_input(
+                "Your answer:",
+                key=f"q_{st.session_state.score['total']}"
+            )
+            
+            if st.button("Submit Answer", type="primary") and answer:
+                handle_answer_submission(answer, question_data)
+
+def handle_answer_submission(user_answer, question_data):
+    is_correct = st.session_state.quiz_bot.check_answer(user_answer, question_data)
+    
+    # Update score
+    st.session_state.score['total'] += 1
+    if is_correct:
+        st.session_state.score['correct'] += 1
+    
+    # Show feedback
+    if is_correct:
+        st.success("✅ Correct!")
+    else:
+        st.error("❌ Incorrect")
+        st.info(f"**Correct answer:** {question_data['correct_answer']}")
+    
+    # Show explanation
+    if 'explanation' in question_data:
+        with st.expander("💡 Explanation"):
+            st.markdown(question_data['explanation'])
+            if 'source' in question_data:
+                st.caption(f"Source: {question_data['source']}")
+    
+    # Reset for next question
+    st.session_state.current_question = None
+    
+    # Show balloons for correct answers
+    if is_correct:
+        st.balloons()
+    
+    if st.button("Next Question →"):
+        st.rerun()
+
+def show_quiz_results():
+    st.markdown("## 🎉 Quiz Complete!")
+    
+    score = st.session_state.score
+    percentage = (score['correct'] / score['total']) * 100
+    
+    # Results display
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Final Score", f"{score['correct']}/{score['total']}")
+    with col2:
+        st.metric("Percentage", f"{percentage:.1f}%")
+    with col3:
+        if percentage >= 90:
+            grade = "A+"
+            emoji = "🌟"
+        elif percentage >= 80:
+            grade = "A"
+            emoji = "🎯"
+        elif percentage >= 70:
+            grade = "B"
+            emoji = "👏"
+        elif percentage >= 60:
+            grade = "C"
+            emoji = "👍"
+        else:
+            grade = "D"
+            emoji = "💪"
+        st.metric("Grade", f"{grade} {emoji}")
+    
+    # Performance feedback
+    if percentage >= 90:
+        st.success("🌟 Outstanding! You've mastered this material!")
+    elif percentage >= 70:
+        st.info("🎯 Great job! You have a solid understanding.")
+    elif percentage >= 50:
+        st.warning("📚 Good effort! Consider reviewing the material again.")
+    else:
+        st.error("💪 Keep studying! Practice makes perfect.")
+    
+    # Action buttons
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 Take Another Quiz", type="primary"):
+            st.session_state.quiz_active = True
+            st.session_state.score = {'correct': 0, 'total': 0}
+            st.session_state.current_question = None
+            st.rerun()
+    
+    with col2:
+        if st.button("📊 View Knowledge Base"):
+            st.session_state.quiz_active = False
+            st.rerun()
+
+def show_knowledge_base_info():
+    st.markdown("## 📚 Knowledge Base Ready!")
+    
+    kb_stats = st.session_state.knowledge_manager.get_stats()
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Documents", kb_stats.get('doc_count', 0))
+    with col2:
+        st.metric("Text Chunks", kb_stats.get('chunk_count', 0))
+    with col3:
+        st.metric("Topics Detected", kb_stats.get('topic_count', 0))
+    
+    st.markdown("### Ready to start your quiz! 🎯")
+    st.markdown("Configure your quiz settings in the sidebar and click **Start Quiz** when ready.")
+    
+    # Show sample questions preview
+    with st.expander("🔍 Preview Sample Questions"):
+        if st.button("Generate Preview"):
+            sample_q = st.session_state.quiz_bot.generate_question("multiple_choice", "medium")
+            if sample_q:
+                st.markdown(f"**Sample Question:** {sample_q['question']}")
+                for i, option in enumerate(sample_q.get('options', []), 1):
+                    st.markdown(f"{i}. {option}")
+
+def create_sample_content():
+    return """
+    Artificial Intelligence and Machine Learning
+    
+    Artificial Intelligence (AI) is a broad field of computer science focused on creating systems capable of performing tasks that typically require human intelligence. These tasks include learning, reasoning, problem-solving, perception, and language understanding.
+    
+    Machine Learning (ML) is a subset of AI that enables computers to learn and improve from experience without being explicitly programmed. Instead of following pre-programmed instructions, ML algorithms build mathematical models based on training data to make predictions or decisions.
+    
+    Types of Machine Learning:
+    1. Supervised Learning: Uses labeled training data to learn a mapping from inputs to outputs
+    2. Unsupervised Learning: Finds hidden patterns in data without labeled examples  
+    3. Reinforcement Learning: Learns through interaction with an environment using rewards and penalties
+    
+    Deep Learning is a subset of machine learning based on artificial neural networks with multiple layers. It has been particularly successful in areas like image recognition, natural language processing, and game playing.
+    
+    Applications of AI include autonomous vehicles, medical diagnosis, fraud detection, recommendation systems, virtual assistants, and many more domains that continue to expand as the technology advances.
+    """
+
+if __name__ == "__main__":
+    main() 

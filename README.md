@@ -65,9 +65,13 @@ A sophisticated AI platform that transforms your documents into interactive lear
 
 ## 📖 How to Use
 
-### 1. **Setup Your API Key**
+### 1. **Configure API Settings**
 - Enter your OpenAI API key in the sidebar
-- The key is used to power AI question generation and evaluation
+- **Advanced Settings**: Optionally configure custom base URL and select AI model
+- **Model Selection**: Choose from predefined models or enter custom model names
+  - **Predefined**: GPT-3.5 Turbo, GPT-4, GPT-4 Turbo, GPT-4o, GPT-4o Mini, and more
+  - **Custom**: Enter any model name (e.g., `gpt-4-1106-preview`, `claude-3-opus`, custom models)
+- Support for OpenAI-compatible APIs by setting custom base URL
 
 ### 2. **Upload Documents**
 - Click "Choose files" to upload your learning materials
@@ -186,6 +190,11 @@ OPENAI_API_KEY=your_api_key_here
 ```
 
 ### Customizable Settings
+- **AI Model Selection**: 
+  - Predefined models: GPT-3.5 Turbo, GPT-4, GPT-4 Turbo, GPT-4o, GPT-4o Mini
+  - Custom models: Enter any model name for latest OpenAI models or third-party APIs
+- **Custom Base URL**: Support for OpenAI-compatible APIs (Azure OpenAI, Anthropic, Local models, etc.)
+- **Model Validation**: Built-in warnings for common model name issues
 - **Chunk Size**: Adjust document splitting (default: 1000 characters)
 - **Chunk Overlap**: Control context preservation (default: 200 characters)
 - **Vector DB**: Persistent storage location (default: ./chroma_db)

@@ -39,6 +39,7 @@ class QuizBot:
         self.llm = None
         self.question_history = []
         self.difficulty_adjustment = 0
+        self._last_config = None  # Track configuration changes
         
         # Log initialization
         logging.info("Initializing QuizBot with GPT-4o-mini model (lazy initialization)")
@@ -46,20 +47,40 @@ class QuizBot:
     def _get_llm(self):
         """Get or initialize the LLM client (lazy initialization)"""
         try:
+            import streamlit as st
+            
             api_key = os.environ.get("OPENAI_API_KEY")
             if not api_key:
                 logging.warning("OpenAI API key not found")
                 return None
+            
+            # Get configuration from session state
+            base_url = getattr(st.session_state, 'openai_base_url', "")
+            selected_model = getattr(st.session_state, 'selected_model', 'gpt-3.5-turbo')
+            model_input_type = getattr(st.session_state, 'model_input_type', 'predefined')
+            current_config = (api_key, base_url, selected_model, model_input_type)
                 
-            # Initialize LLM if not already done
-            if self.llm is None:
-                logging.info("Initializing ChatOpenAI with GPT-4o-mini model")
-                self.llm = ChatOpenAI(
-                    model="gpt-4o-mini",
-                    api_key=api_key,
-                    temperature=0.7,
-                    max_tokens=1000
-                )
+            # Initialize LLM if not already done or if configuration changed
+            if self.llm is None or self._last_config != current_config:
+                if self._last_config != current_config:
+                    logging.info("Configuration changed, reinitializing LLM")
+                    self.llm = None  # Reset LLM
+                logging.info(f"Initializing ChatOpenAI with {selected_model} model")
+                
+                llm_kwargs = {
+                    "model": selected_model,
+                    "api_key": api_key,
+                    "temperature": 0.7,
+                    "max_tokens": 1000
+                }
+                
+                # Add base_url if provided
+                if base_url and base_url.strip():
+                    llm_kwargs["base_url"] = base_url.strip()
+                    logging.info(f"Using custom base URL: {base_url}")
+                
+                self.llm = ChatOpenAI(**llm_kwargs)
+                self._last_config = current_config  # Store current config
                 
                 # Test the LLM connection
                 try:

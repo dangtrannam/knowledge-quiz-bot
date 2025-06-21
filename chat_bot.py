@@ -9,17 +9,37 @@ class ChatBot:
     def __init__(self, knowledge_manager: KnowledgeManager):
         self.knowledge_manager = knowledge_manager
         self.client = None
+        self._last_config = None  # Track configuration changes
         
     def _get_openai_client(self):
         """Get or initialize OpenAI client"""
         try:
+            import streamlit as st
+            
             api_key = os.environ.get("OPENAI_API_KEY")
             if not api_key:
                 return None
+            
+            # Get configuration from session state
+            base_url = getattr(st.session_state, 'openai_base_url', "")
+            selected_model = getattr(st.session_state, 'selected_model', 'gpt-3.5-turbo')
+            model_input_type = getattr(st.session_state, 'model_input_type', 'predefined')
+            current_config = (api_key, base_url, selected_model, model_input_type)
+            
+            # Initialize client if not already done or if configuration changed
+            if self.client is None or self._last_config != current_config:
+                if self._last_config != current_config:
+                    logging.info("Configuration changed, reinitializing OpenAI client")
+                    self.client = None  # Reset client
+                client_kwargs = {"api_key": api_key}
                 
-            # Initialize client if not already done or if API key changed
-            if self.client is None:
-                self.client = OpenAI(api_key=api_key)
+                # Add base_url if provided
+                if base_url and base_url.strip():
+                    client_kwargs["base_url"] = base_url.strip()
+                    logging.info(f"Using custom base URL: {base_url}")
+                
+                self.client = OpenAI(**client_kwargs)
+                self._last_config = current_config  # Store current config
                 logging.info("OpenAI client initialized successfully")
             
             return self.client
@@ -172,9 +192,12 @@ Available context from documents:
             # Add current user message
             messages.append({"role": "user", "content": user_message})
             
+            # Get selected model from session state
+            selected_model = getattr(st.session_state, 'selected_model', 'gpt-3.5-turbo')
+            
             # Generate response
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=selected_model,
                 messages=messages,
                 max_tokens=1000,
                 temperature=0.7,

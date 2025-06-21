@@ -30,6 +30,14 @@ def main():
         st.session_state.chat_history = []
     if 'selected_documents' not in st.session_state:
         st.session_state.selected_documents = ['all']
+    if 'openai_base_url' not in st.session_state:
+        st.session_state.openai_base_url = ""
+    if 'selected_model' not in st.session_state:
+        st.session_state.selected_model = "gpt-3.5-turbo"
+    if 'model_input_type' not in st.session_state:
+        st.session_state.model_input_type = "predefined"
+    if 'custom_model' not in st.session_state:
+        st.session_state.custom_model = ""
     
     # Header
     st.title("🧠 Knowledge Quiz Bot")
@@ -58,12 +66,139 @@ def main():
                 if not st.session_state.chat_bot and preload_status['vectorstore_available']:
                     st.session_state.chat_bot = ChatBot(st.session_state.knowledge_manager)
         
-        # API Key input
+        # API Configuration
+        st.subheader("🔧 API Configuration")
+        
         api_key = st.text_input(
             "OpenAI API Key", 
             type="password",
-            help="Enter your OpenAI API key to power the quiz generation"
+            help="Enter your OpenAI API key to power the AI features"
         )
+        
+        # Advanced API settings in an expander
+        with st.expander("⚙️ Advanced Settings"):
+            base_url = st.text_input(
+                "Base URL (Optional)",
+                value=st.session_state.openai_base_url,
+                placeholder="https://api.openai.com/v1",
+                help="Custom base URL for OpenAI-compatible APIs (leave empty for default)"
+            )
+            
+            # Model selection type
+            model_input_type = st.radio(
+                "Model Selection",
+                options=["predefined", "custom"],
+                format_func=lambda x: "📋 Select from List" if x == "predefined" else "✏️ Custom Model",
+                horizontal=True,
+                help="Choose to select from predefined models or enter a custom model name"
+            )
+            
+            # Model selection based on type
+            if model_input_type == "predefined":
+                predefined_models = [
+                    "gpt-3.5-turbo",
+                    "gpt-4",
+                    "gpt-4-turbo",
+                    "gpt-4o",
+                    "gpt-4o-mini",
+                    "gpt-4-turbo-preview",
+                    "gpt-3.5-turbo-16k"
+                ]
+                
+                # Ensure current model is in the list or default to first option
+                current_model_index = 0
+                if st.session_state.selected_model in predefined_models:
+                    current_model_index = predefined_models.index(st.session_state.selected_model)
+                
+                selected_model = st.selectbox(
+                    "AI Model",
+                    options=predefined_models,
+                    index=current_model_index,
+                    help="Choose the AI model to use for generation"
+                )
+                
+                # Update session state
+                st.session_state.selected_model = selected_model
+                st.session_state.custom_model = ""
+                
+            else:  # custom model
+                custom_model = st.text_input(
+                    "Custom Model Name",
+                    value=st.session_state.custom_model,
+                    placeholder="e.g., gpt-4-1106-preview, claude-3-opus, custom-model-name",
+                    help="Enter the exact model name as expected by your API"
+                )
+                
+                # Show helpful examples
+                st.info("""
+                💡 **Custom Model Examples:**
+                
+                **OpenAI Models:**
+                • `gpt-4-1106-preview` (Latest GPT-4 Turbo)
+                • `gpt-4-vision-preview` (GPT-4 with vision)
+                • `gpt-3.5-turbo-1106` (Latest GPT-3.5)
+                
+                **Other APIs (with custom base URL):**
+                • `claude-3-opus-20240229` (Anthropic)
+                • `claude-3-sonnet-20240229` (Anthropic)
+                • `mistral-large-latest` (Mistral AI)
+                • `llama-2-70b-chat` (Local/Ollama)
+                
+                **Note:** Make sure your API endpoint supports the model you specify.
+                """)
+                
+                if custom_model and custom_model.strip():
+                    selected_model = custom_model.strip()
+                    st.session_state.selected_model = selected_model
+                    st.session_state.custom_model = custom_model.strip()
+                    
+                    # Basic validation and warnings
+                    if ' ' in selected_model:
+                        st.warning("⚠️ Model names usually don't contain spaces. Please check your model name.")
+                    elif selected_model.startswith('gpt') and not any(x in selected_model for x in ['3.5', '4']):
+                        st.info("ℹ️ Make sure this is a valid GPT model variant.")
+                    elif len(selected_model) < 3:
+                        st.warning("⚠️ Model name seems too short. Please verify it's correct.")
+                else:
+                    # Fallback to default if custom model is empty
+                    selected_model = "gpt-3.5-turbo"
+                    st.session_state.selected_model = selected_model
+                    if not custom_model:  # Only clear if completely empty
+                        st.session_state.custom_model = ""
+            
+            # Update session state
+            st.session_state.openai_base_url = base_url
+            st.session_state.model_input_type = model_input_type
+            
+            # Show current settings
+            st.caption(f"**Current Model:** {selected_model}")
+            if model_input_type == "custom" and selected_model:
+                if selected_model in ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo", "gpt-4o", "gpt-4o-mini"]:
+                    st.caption("ℹ️ This looks like a standard model - you could use the predefined list")
+                else:
+                    st.caption("✏️ Using custom model")
+            
+            if base_url:
+                st.caption(f"**Base URL:** {base_url}")
+            else:
+                st.caption("**Base URL:** Default (OpenAI)")
+            
+            # Reset configuration button
+            if st.button("🔄 Reset AI Configuration", help="Clear cached clients and reinitialize with new settings"):
+                # Clear cached clients by resetting bot instances
+                if st.session_state.chat_bot:
+                    st.session_state.chat_bot.client = None
+                    st.session_state.chat_bot._last_config = None
+                if st.session_state.quiz_bot:
+                    st.session_state.quiz_bot.llm = None
+                    st.session_state.quiz_bot._last_config = None
+                # Reset model configuration to defaults
+                st.session_state.model_input_type = "predefined"
+                st.session_state.selected_model = "gpt-3.5-turbo"
+                st.session_state.custom_model = ""
+                st.session_state.openai_base_url = ""
+                st.success("🔄 AI configuration reset to defaults! Changes will take effect on next use.")
+                st.rerun()
         
         if api_key:
             os.environ["OPENAI_API_KEY"] = api_key

@@ -1,0 +1,152 @@
+---
+alwaysApply: true
+---
+# Cursor Rule: RAG-AI Application Development
+
+You are an expert in Retrieval-Augmented Generation (RAG) systems, with a focus on building scalable, efficient applications using modern Python libraries. You specialize in integrating LLMs with external knowledge bases using vector databases and the LangChain framework.
+
+---
+
+## 🧠 Key Principles
+
+- Write **concise**, **modular**, and **production-ready** Python code.
+- Use **object-oriented** design for components (retrievers, chains, tools) and **functional** paradigms for pipelines.
+- Optimize for **retrieval and generation latency** (real-time or near-real-time).
+- Enforce **PEP8**, use **type annotations**, and **pydantic** for schema validation.
+
+---
+
+## 🧰 Frameworks & Libraries
+
+Use and follow best practices from:
+
+- `LangChain`: chaining prompts, tools, retrievers, and agents
+- `OpenAI`: GPT integration (chat/completion)
+- `ChromaDB` / `FAISS`: vector store backends
+- `SentenceTransformers`, `tiktoken`: embeddings and token counting
+- `Streamlit`: interactive front-end demos
+- `PyPDF2`, `python-docx`: document ingestion
+- `dotenv`, `pydantic`: configuration and validation
+
+**Additional tools**:  
+`langchainhub`, `tenacity`, `rich`, `loguru`, `nltk`, `scikit-learn`, `unstructured`, `pdfminer.six`
+
+---
+
+## 🧱 System Design Guidelines
+
+### 📦 Architecture
+
+- Use modular folder structure: loaders/, embeddings/, vectorstores/, retrievers/, chains/, agents/, ui/
+
+- Abstract LLM, retrieval, and prompt logic behind interfaces.
+- Enable config-driven orchestration via `.env` or `YAML`.
+
+---
+
+### 📄 Data Ingestion
+
+- Use `LangChain` document loaders: `PyPDFLoader`, `DocxLoader`, etc.
+- Normalize text: strip whitespace, remove boilerplate.
+- Split text using `RecursiveCharacterTextSplitter`.
+
+---
+
+### 🧠 Embedding & Vector Store
+
+- Use `sentence-transformers` or `OpenAI` embeddings.
+- Persist vectors in `Chroma` or `FAISS`.
+- Implement deduplication & metadata tagging for chunks.
+
+---
+
+### 🔎 Retriever Design
+
+- Use `VectorStoreRetriever` (similarity or MMR).
+- Chain retrievers for hybrid search (e.g., keyword + vector).
+- Validate with retriever evaluators: `Precision@k`, `Recall@k`.
+
+---
+
+### 🤖 LLM Integration
+
+- Use `ChatOpenAI` or `OpenAI` from `langchain-openai`.
+- Implement token-aware prompts using `tiktoken`.
+- Add streaming support in Streamlit for better UX.
+
+---
+
+### ✏️ Prompt Engineering
+
+- Centralize prompts in `prompts/`.
+- Use `ChatPromptTemplate` with descriptive input variables.
+- Use memory selectively (e.g., `ConversationBufferMemory`).
+
+---
+
+### 🔁 RAG Chain
+
+- Use `RetrievalQA` or `ConversationalRetrievalChain`.
+- Log source documents and similarity scores.
+- Optionally implement a custom `Runnable` chain for fine control.
+
+---
+
+## 🖥️ Frontend (Streamlit)
+
+- Build real-time demos using `Streamlit`.
+- Display:
+- Context passages
+- Confidence/similarity scores
+- Source references
+- Include:
+- File upload
+- Session chat history
+
+---
+
+## ✅ Best Practices
+
+- Use sequential thinking, search internet for definition you need, use context7 for library usage, create todo if needed
+- Use `.env` + `python-dotenv` for secrets.
+- Validate inputs/outputs with `pydantic`.
+- Log with `loguru` or `rich.console`.
+- Track evaluations with `wandb` or local JSON.
+- Use `tenacity.retry` for transient API failures.
+- Cache embeddings and doc states when possible.
+- Evaluate responses manually and heuristically (factuality, relevance, conciseness).
+
+---
+
+## 🔧 Development Conventions
+
+- **Startup**: Define problem statement, user flow, and doc source.
+- **Structure**: Modular folders; separate chain setup from inference logic.
+- **Tracking**: Log retrieval stats, model latency, prompt versions.
+- **Versioning**: Use Git and lock dependencies (`requirements.txt` or `poetry.lock`).
+
+---
+
+## 📦 `requirements.txt` (Extended)
+
+```txt
+streamlit>=1.28.0
+openai>=1.0.0
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-community>=0.0.10
+langchainhub>=0.1.14
+chromadb>=0.4.0
+faiss-cpu>=1.7.4
+PyPDF2>=3.0.0
+python-docx>=0.8.11
+tiktoken>=0.5.0
+sentence-transformers>=2.2.2
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+typing-extensions>=4.5.0
+tenacity>=8.2.2
+unstructured>=0.10.3
+loguru>=0.7.0
+nltk>=3.8.1
+scikit-learn>=1.3.0

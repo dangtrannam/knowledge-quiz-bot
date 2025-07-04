@@ -4,48 +4,30 @@ import hashlib
 import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
 import random
 import logging
+from loaders.document_loader import DocumentLoader
+from embeddings.embedding_model import EmbeddingModel
+from vectorstores.chroma_store import ChromaStoreManager
+from retrievers.vector_retriever import VectorStoreRetriever
 
 class KnowledgeManager:
+    """
+    Orchestrates document ingestion, embedding, vector storage, and retrieval using modular components.
+    """
     def __init__(self, persist_directory: str = "./chroma_db", metadata_file: str = "./processed_files.json"):
-        self.documents = []
-        self.vectorstore = None
         self.persist_directory = persist_directory
         self.metadata_file = metadata_file
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            length_function=len,
-        )
-        self.embeddings = None
-        self.processed_files = {}  # Changed to dict to store metadata
+        self.loader = DocumentLoader()
+        self.embedder = EmbeddingModel()
+        self.vectorstore_manager = ChromaStoreManager(persist_directory)
+        self.documents = []
+        self.processed_files = {}
         self.is_preloaded = False
-        
-        # Initialize embeddings early
-        self._initialize_embeddings()
-        
-        # Load existing metadata and preload if available
+        self.vectorstore = None
+        self.retriever = None
         self._load_metadata()
         self._preload_existing_documents()
-    
-    def _initialize_embeddings(self):
-        """Initialize embeddings model early"""
-        try:
-            if not self.embeddings:
-                logging.info("Initializing HuggingFace embeddings...")
-                self.embeddings = HuggingFaceEmbeddings(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2",
-                    model_kwargs={'device': 'cpu'},
-                    encode_kwargs={'normalize_embeddings': True}
-                )
-                logging.info("Embeddings initialized successfully")
-        except Exception as e:
-            logging.error(f"Failed to initialize embeddings: {e}")
     
     def _load_metadata(self):
         """Load metadata about processed files"""
@@ -74,61 +56,33 @@ class KnowledgeManager:
     def _preload_existing_documents(self):
         """Preload existing vector database if available"""
         try:
-            if os.path.exists(self.persist_directory) and self.embeddings:
-                logging.info("Attempting to preload existing vector database...")
-                
-                # Try to load existing vectorstore
-                self.vectorstore = Chroma(
-                    persist_directory=self.persist_directory,
-                    embedding_function=self.embeddings
-                )
-                
-                # Check if vectorstore has documents
-                try:
-                    # Try to get a sample to verify the vectorstore works
-                    sample_results = self.vectorstore.similarity_search("test", k=1)
-                    if sample_results:
-                        logging.info(f"Successfully preloaded vector database with documents")
-                        self.is_preloaded = True
-                        
-                        # Reconstruct documents list from metadata
-                        self._reconstruct_documents_from_metadata()
-                    else:
-                        logging.info("Vector database exists but appears empty")
-                except Exception as e:
-                    logging.warning(f"Vector database exists but may be corrupted: {e}")
-                    self.vectorstore = None
-                    
+            embeddings = self.embedder.get()
+            if not embeddings:
+                logging.warning("Embeddings not available during preload. Vector store will not be loaded.")
+                return
+            
+            # Test embeddings before using them
+            try:
+                test_embedding = embeddings.embed_query("test")
+                if not test_embedding or len(test_embedding) == 0:
+                    logging.warning("Embedding test failed during preload. Skipping vector store loading.")
+                    return
+            except Exception as e:
+                logging.warning(f"Embedding test failed during preload: {e}. Skipping vector store loading.")
+                return
+            
+            self.vectorstore = self.vectorstore_manager.load_existing(embeddings)
+            if self.vectorstore:
+                self.is_preloaded = True
+                self.retriever = VectorStoreRetriever(self.vectorstore)
+                logging.info("Preloaded vectorstore and retriever.")
+            else:
+                logging.info("No existing vector store found to preload.")
         except Exception as e:
-            logging.error(f"Error preloading documents: {e}")
-            self.vectorstore = None
+            logging.error(f"Error during preload: {e}")
             self.is_preloaded = False
     
-    def _reconstruct_documents_from_metadata(self):
-        """Reconstruct documents list from saved metadata"""
-        try:
-            # This is a simplified reconstruction - in a full implementation,
-            # you might want to save document content separately
-            self.documents = []
-            
-            # For now, we'll rely on the vectorstore for content
-            # and use metadata for file tracking
-            logging.info(f"Reconstructed knowledge base from {len(self.processed_files)} processed files")
-            
-        except Exception as e:
-            logging.error(f"Error reconstructing documents: {e}")
-    
-    def get_preload_status(self) -> Dict[str, Any]:
-        """Get information about preloaded content"""
-        return {
-            'is_preloaded': self.is_preloaded,
-            'processed_files_count': len(self.processed_files),
-            'processed_files': list(self.processed_files.keys()) if self.processed_files else [],
-            'vectorstore_available': self.vectorstore is not None,
-            'embeddings_ready': self.embeddings is not None
-        }
-
-    def process_documents(self, uploaded_files):
+    def process_documents(self, uploaded_files) -> Dict[str, Any]:
         """Process uploaded documents and build vector database"""
         try:
             new_files = []
@@ -168,11 +122,11 @@ class KnowledgeManager:
                 
                 try:
                     # Load document based on file type
-                    documents = self._load_document(tmp_file_path, uploaded_file.name)
+                    documents = self.loader.load_document(tmp_file_path, uploaded_file.name)
                     
                     if documents:
                         # Split documents into chunks
-                        texts = self.text_splitter.split_documents(documents)
+                        texts = self.loader.split_documents(documents)
                         
                         # Add enhanced metadata
                         current_time = datetime.now().isoformat()
@@ -206,26 +160,59 @@ class KnowledgeManager:
             
             if all_texts:
                 # Create or update vector database
-                if self.vectorstore is None:
-                    self.vectorstore = Chroma.from_documents(
-                        documents=all_texts,
-                        embedding=self.embeddings,
-                        persist_directory=self.persist_directory
-                    )
-                    logging.info("Created new vector database")
-                else:
-                    # Add new documents to existing vectorstore
-                    self.vectorstore.add_documents(all_texts)
-                    logging.info(f"Added {len(all_texts)} new chunks to existing vector database")
+                embeddings = self.embedder.get()
+                if not embeddings:
+                    logging.error("Embeddings not available. Cannot create vector store.")
+                    return {
+                        'success': False,
+                        'new_files': 0,
+                        'skipped_files': len(skipped_files),
+                        'skipped_list': skipped_files,
+                        'error': 'Embedding model failed to initialize. Please check system logs.',
+                        'message': 'Cannot process documents without embedding model.'
+                    }
                 
-                # Persist the database
-                self.vectorstore.persist()
+                # Verify embeddings are working
+                try:
+                    test_embedding = embeddings.embed_query("test")
+                    if not test_embedding or len(test_embedding) == 0:
+                        raise ValueError("Embeddings returned empty result")
+                except Exception as e:
+                    logging.error(f"Embedding test failed: {e}")
+                    return {
+                        'success': False,
+                        'new_files': 0,
+                        'skipped_files': len(skipped_files),
+                        'skipped_list': skipped_files,
+                        'error': f'Embedding model test failed: {str(e)}',
+                        'message': 'Embedding model is not working properly.'
+                    }
+                
+                # Create vector store
+                try:
+                    if self.vectorstore is None:
+                        self.vectorstore = self.vectorstore_manager.create_from_documents(all_texts, embeddings)
+                    else:
+                        self.vectorstore_manager.add_documents(all_texts)
+                    self.vectorstore_manager.persist()
+                except Exception as e:
+                    logging.error(f"Failed to create/update vector store: {e}")
+                    return {
+                        'success': False,
+                        'new_files': 0,
+                        'skipped_files': len(skipped_files),
+                        'skipped_list': skipped_files,
+                        'error': f'Vector store creation failed: {str(e)}',
+                        'message': 'Failed to create vector database.'
+                    }
                 
                 # Update document list
                 self.documents.extend(all_texts)
                 
                 # Save metadata
                 self._save_metadata()
+                
+                self.retriever = VectorStoreRetriever(self.vectorstore, self.documents)
                 
                 return {
                     'success': True,
@@ -255,60 +242,42 @@ class KnowledgeManager:
     def process_text_content(self, text_content: str, source_name: str = "Sample Content"):
         """Process raw text content for demo purposes"""
         try:
-            if not self.embeddings:
-                self.embeddings = HuggingFaceEmbeddings(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2",
-                    model_kwargs={'device': 'cpu'},
-                    encode_kwargs={'normalize_embeddings': True}
-                )
+            embeddings = self.embedder.get()
+            if not embeddings:
+                # If embeddings are not initialized, try to re-instantiate
+                logging.warning("Embeddings not available, attempting to reinitialize...")
+                self.embedder = EmbeddingModel()
+                embeddings = self.embedder.get()
+                if not embeddings:
+                    raise Exception("Failed to initialize embedding model")
             
-            # Create document-like object
+            # Test embeddings
+            try:
+                test_embedding = embeddings.embed_query("test")
+                if not test_embedding or len(test_embedding) == 0:
+                    raise ValueError("Embeddings test failed")
+            except Exception as e:
+                logging.error(f"Embedding test failed: {e}")
+                raise Exception(f"Embedding model is not working: {e}")
+            
             from langchain.schema import Document
             document = Document(page_content=text_content, metadata={"source": source_name})
+            texts = self.loader.split_documents([document])
             
-            # Split into chunks
-            texts = self.text_splitter.split_documents([document])
-            
-            # Create vector database
-            self.vectorstore = Chroma.from_documents(
-                documents=texts,
-                embedding=self.embeddings,
-                persist_directory="./chroma_db"
-            )
-            
-            self.documents = texts
-            return True
+            # Create vector store with error handling
+            try:
+                self.vectorstore = self.vectorstore_manager.create_from_documents(texts, embeddings)
+                self.documents = texts
+                self.retriever = VectorStoreRetriever(self.vectorstore, self.documents)
+                logging.info(f"Successfully processed text content: {len(texts)} chunks created")
+                return True
+            except Exception as e:
+                logging.error(f"Failed to create vector store from text: {e}")
+                raise Exception(f"Vector store creation failed: {e}")
             
         except Exception as e:
             logging.error(f"Error processing text content: {str(e)}")
             raise e
-    
-    def _load_document(self, file_path: str, original_filename: str):
-        """Load document based on file extension"""
-        file_extension = original_filename.split('.')[-1].lower()
-        
-        try:
-            if file_extension == 'pdf':
-                loader = PyPDFLoader(file_path)
-            elif file_extension == 'txt':
-                loader = TextLoader(file_path, encoding='utf-8')
-            elif file_extension in ['docx', 'doc']:
-                loader = Docx2txtLoader(file_path)
-            else:
-                raise ValueError(f"Unsupported file type: {file_extension}")
-            
-            documents = loader.load()
-            
-            # Add source metadata
-            for doc in documents:
-                doc.metadata['original_filename'] = original_filename
-                doc.metadata['file_type'] = file_extension
-            
-            return documents
-            
-        except Exception as e:
-            logging.error(f"Error loading document {original_filename}: {str(e)}")
-            return []
     
     def _get_file_hash(self, uploaded_file) -> str:
         """Generate hash for uploaded file to avoid reprocessing"""
@@ -419,13 +388,24 @@ class KnowledgeManager:
     def clear_knowledge_base(self):
         """Clear the current knowledge base"""
         self.documents = []
+        self.processed_files = {}
+        # Properly dereference the vectorstore before deleting files
+        if self.vectorstore is not None:
+            try:
+                del self.vectorstore
+            except Exception as e:
+                logging.warning(f"Error deleting vectorstore: {e}")
         self.vectorstore = None
-        self.processed_files = set()
-        
-        # Clear persisted database
-        import shutil
+        import shutil, gc, time, os
+        # Run garbage collection to release file handles
+        gc.collect()
+        time.sleep(0.2)  # Give the OS a moment to release the lock
         if os.path.exists("./chroma_db"):
-            shutil.rmtree("./chroma_db")
+            try:
+                shutil.rmtree("./chroma_db")
+            except Exception as e:
+                logging.error(f"Error deleting chroma_db directory: {e}")
+                raise
     
     def export_knowledge_base(self) -> Dict[str, Any]:
         """Export knowledge base for backup/sharing"""
@@ -499,7 +479,7 @@ class KnowledgeManager:
     def rebuild_vectorstore(self):
         """Rebuild the vectorstore from current documents"""
         try:
-            if not self.documents or not self.embeddings:
+            if not self.documents or not self.embedder.get():
                 return False
             
             # Clear existing vectorstore
@@ -508,13 +488,8 @@ class KnowledgeManager:
                 shutil.rmtree(self.persist_directory)
             
             # Recreate vectorstore
-            self.vectorstore = Chroma.from_documents(
-                documents=self.documents,
-                embedding=self.embeddings,
-                persist_directory=self.persist_directory
-            )
+            self.vectorstore = self.vectorstore_manager.create_from_documents(self.documents, self.embedder.get())
             
-            self.vectorstore.persist()
             logging.info("Successfully rebuilt vectorstore")
             return True
             

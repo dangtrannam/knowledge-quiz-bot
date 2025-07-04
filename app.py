@@ -2,10 +2,119 @@ import streamlit as st
 import os
 import json
 from datetime import datetime
-from quiz_bot import QuizBot
-from chat_bot import ChatBot
 from knowledge_manager import KnowledgeManager
-from utils import setup_page_config, load_css
+from agents.quiz_agent import QuizAgent
+from agents.chat_agent import ChatAgent
+from ui.utils import setup_page_config, load_css
+from dotenv import load_dotenv
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,  # Change to DEBUG for more detail
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+
+load_dotenv()
+
+# Helper to get preload status from KnowledgeManager
+# (add this method to KnowledgeManager if not present)
+def get_preload_status(km):
+    return {
+        'is_preloaded': getattr(km, 'is_preloaded', False),
+        'processed_files_count': len(getattr(km, 'processed_files', {})),
+        'processed_files': list(getattr(km, 'processed_files', {}).keys()),
+        'vectorstore_available': getattr(km, 'vectorstore', None) is not None,
+        'embeddings_ready': getattr(getattr(km, 'embedder', None), 'get', lambda: None)() is not None
+    }
+
+def get_knowledge_manager():
+    """Safely get knowledge manager with error handling"""
+    km = st.session_state.get('knowledge_manager')
+    if km is None:
+        st.error("❌ Knowledge Manager not available. Please refresh the page.")
+        st.stop()
+    return km
+
+# Demo content for testing
+demo_content = {
+    "ai_ml": """
+    # Introduction to Artificial Intelligence and Machine Learning
+
+    Artificial Intelligence (AI) is a broad field of computer science that aims to create intelligent machines capable of performing tasks that typically require human intelligence. These tasks include visual perception, speech recognition, decision-making, and language translation.
+
+    ## Machine Learning Fundamentals
+
+    Machine Learning (ML) is a subset of artificial intelligence that focuses on the development of algorithms and statistical models that enable computer systems to improve their performance on a specific task through experience, without being explicitly programmed.
+
+    ### Types of Machine Learning
+
+    1. **Supervised Learning**: Uses labeled training data to learn a mapping function from inputs to outputs. Examples include classification and regression tasks.
+
+    2. **Unsupervised Learning**: Finds hidden patterns or intrinsic structures in input data without labeled examples. Common techniques include clustering and dimensionality reduction.
+
+    3. **Reinforcement Learning**: An agent learns to make decisions by taking actions in an environment to maximize cumulative reward.
+
+    ### Key Concepts
+
+    **Training Data**: The dataset used to teach machine learning algorithms. Quality and quantity of training data significantly impact model performance.
+
+    **Features**: Individual measurable properties of observed phenomena. Feature selection and engineering are crucial for model success.
+
+    **Model**: The mathematical representation of a real-world process. Models are trained on data and used to make predictions or decisions.
+
+    **Overfitting**: When a model learns the training data too well, including noise, resulting in poor generalization to new data.
+
+    **Cross-validation**: A technique for assessing how well a model will generalize to an independent dataset.
+
+    ## Deep Learning
+
+    Deep Learning is a subset of machine learning based on artificial neural networks with multiple layers. These networks can automatically discover representations from data, making them particularly effective for complex tasks like image recognition and natural language processing.
+
+    ### Neural Networks
+
+    Neural networks are computing systems inspired by biological neural networks. They consist of interconnected nodes (neurons) organized in layers:
+
+    - **Input Layer**: Receives the initial data
+    - **Hidden Layers**: Process the data through weighted connections
+    - **Output Layer**: Produces the final result
+
+    ### Common Applications
+
+    - **Computer Vision**: Image classification, object detection, facial recognition
+    - **Natural Language Processing**: Language translation, sentiment analysis, chatbots
+    - **Speech Recognition**: Converting speech to text, voice assistants
+    - **Recommendation Systems**: Personalized content suggestions
+    - **Autonomous Vehicles**: Self-driving car navigation and decision-making
+
+    ## Getting Started with Machine Learning
+
+    1. **Learn the Fundamentals**: Understand statistics, linear algebra, and programming
+    2. **Choose Tools**: Popular options include Python (scikit-learn, TensorFlow, PyTorch) and R
+    3. **Practice with Datasets**: Work with real data to build practical experience
+    4. **Join Communities**: Participate in forums, competitions, and open-source projects
+    5. **Stay Updated**: Follow research papers, blogs, and industry developments
+
+    Machine learning is rapidly evolving, with new techniques and applications emerging regularly. Success requires continuous learning and adaptation to new methodologies and technologies.
+    """
+}
+
+# Helper to get available documents from KnowledgeManager
+# (add this method to ChatAgent if not present)
+def get_available_documents(km):
+    processed_files = getattr(km, 'processed_files', {})
+    documents = []
+    documents.append({
+        'id': 'all',
+        'name': '📚 All Documents',
+        'description': f'Chat with all {len(processed_files)} documents'
+    })
+    for file_hash, metadata in processed_files.items():
+        documents.append({
+            'id': file_hash,
+            'name': f"📄 {metadata.get('filename', 'Unknown')}",
+            'description': f"{metadata.get('file_type', '').upper()} • {metadata.get('chunk_count', 0)} chunks • {round(metadata.get('file_size', 0) / (1024 * 1024), 2)} MB"
+        })
+    return documents
 
 def main():
     setup_page_config()
@@ -17,7 +126,18 @@ def main():
     if 'chat_bot' not in st.session_state:
         st.session_state.chat_bot = None
     if 'knowledge_manager' not in st.session_state:
-        st.session_state.knowledge_manager = KnowledgeManager()
+        try:
+            st.session_state.knowledge_manager = KnowledgeManager()
+            # Check if embeddings are working
+            if hasattr(st.session_state.knowledge_manager, 'embedder'):
+                if not st.session_state.knowledge_manager.embedder.is_ready():
+                    st.warning("⚠️ Embedding model failed to initialize. Some features may not work properly.")
+                    st.info("💡 Try refreshing the page or check your system's torch/CUDA installation.")
+        except Exception as e:
+            st.error(f"❌ Failed to initialize Knowledge Manager: {str(e)}")
+            st.info("💡 Try refreshing the page. If the problem persists, check system requirements.")
+            # Initialize with a placeholder to prevent repeated errors
+            st.session_state.knowledge_manager = None
     if 'quiz_active' not in st.session_state:
         st.session_state.quiz_active = False
     if 'chat_active' not in st.session_state:
@@ -31,9 +151,9 @@ def main():
     if 'selected_documents' not in st.session_state:
         st.session_state.selected_documents = ['all']
     if 'openai_base_url' not in st.session_state:
-        st.session_state.openai_base_url = ""
+        st.session_state.openai_base_url = "https://aiportalapi.stu-platform.live/jpe"
     if 'selected_model' not in st.session_state:
-        st.session_state.selected_model = "gpt-3.5-turbo"
+        st.session_state.selected_model = "GPT-4o-mini"
     if 'model_input_type' not in st.session_state:
         st.session_state.model_input_type = "predefined"
     if 'custom_model' not in st.session_state:
@@ -49,22 +169,34 @@ def main():
         
         # Show preload status
         if st.session_state.knowledge_manager:
-            preload_status = st.session_state.knowledge_manager.get_preload_status()
+            preload_status = get_preload_status(st.session_state.knowledge_manager)
             if preload_status['is_preloaded']:
                 st.success("🚀 Preloaded from previous session")
                 st.caption(f"📁 {preload_status['processed_files_count']} files ready")
-                # Initialize bots if not already done
-                if not st.session_state.quiz_bot and preload_status['vectorstore_available']:
-                    st.session_state.quiz_bot = QuizBot(st.session_state.knowledge_manager)
-                if not st.session_state.chat_bot and preload_status['vectorstore_available']:
-                    st.session_state.chat_bot = ChatBot(st.session_state.knowledge_manager)
+                # Initialize agents with credentials
+                try:
+                    km = get_knowledge_manager()
+                    if km.retriever:
+                        st.session_state.quiz_bot = QuizAgent(km.retriever)
+                        st.session_state.chat_bot = ChatAgent(km.retriever)
+                        # Don't automatically activate modes - let user choose
+                    else:
+                        st.warning("⚠️ No documents loaded. Please upload and process documents first.")
+                except Exception as e:
+                    st.error(f"Failed to initialize agents: {e}")
             elif preload_status['processed_files_count'] > 0:
                 st.info("📚 Knowledge base available")
-                # Initialize bots if not already done
-                if not st.session_state.quiz_bot and preload_status['vectorstore_available']:
-                    st.session_state.quiz_bot = QuizBot(st.session_state.knowledge_manager)
-                if not st.session_state.chat_bot and preload_status['vectorstore_available']:
-                    st.session_state.chat_bot = ChatBot(st.session_state.knowledge_manager)
+                # Initialize agents for demo mode
+                try:
+                    km = get_knowledge_manager()
+                    if km.retriever:
+                        st.session_state.quiz_bot = QuizAgent(km.retriever)
+                        st.session_state.chat_bot = ChatAgent(km.retriever)
+                        # Don't automatically activate modes - let user choose
+                    else:
+                        st.warning("⚠️ No documents loaded. Please upload and process documents first.")
+                except Exception as e:
+                    st.error(f"Failed to initialize agents: {e}")
         
         # API Configuration
         st.subheader("🔧 API Configuration")
@@ -80,8 +212,8 @@ def main():
             base_url = st.text_input(
                 "Base URL (Optional)",
                 value=st.session_state.openai_base_url,
-                placeholder="https://api.openai.com/v1",
-                help="Custom base URL for OpenAI-compatible APIs (leave empty for default)"
+                placeholder="https://aiportalapi.stu-platform.live/jpe",
+                help="Custom base URL for OpenAI-compatible APIs (leave empty for default)",
             )
             
             # Model selection type
@@ -96,13 +228,10 @@ def main():
             # Model selection based on type
             if model_input_type == "predefined":
                 predefined_models = [
+                    'GPT-4o-mini',
                     "gpt-3.5-turbo",
-                    "gpt-4",
-                    "gpt-4-turbo",
                     "gpt-4o",
                     "gpt-4o-mini",
-                    "gpt-4-turbo-preview",
-                    "gpt-3.5-turbo-16k"
                 ]
                 
                 # Ensure current model is in the list or default to first option
@@ -194,86 +323,73 @@ def main():
                     st.session_state.quiz_bot._last_config = None
                 # Reset model configuration to defaults
                 st.session_state.model_input_type = "predefined"
-                st.session_state.selected_model = "gpt-3.5-turbo"
+                st.session_state.selected_model = "GPT-4o-mini"
                 st.session_state.custom_model = ""
                 st.session_state.openai_base_url = ""
                 st.success("🔄 AI configuration reset to defaults! Changes will take effect on next use.")
                 st.rerun()
+            
+            # Debug section for troubleshooting
+            st.markdown("**🔧 Debug & Troubleshooting**")
+            col_debug1, col_debug2 = st.columns(2)
+            
+            with col_debug1:
+                if st.button("🗑️ Clear Vector Store", help="Clear all vector store data to resolve source reference issues"):
+                    try:
+                        km = get_knowledge_manager()
+                        km.clear_knowledge_base()
+                        st.session_state.quiz_bot = None
+                        st.session_state.chat_bot = None
+                        st.session_state.chat_active = False
+                        st.session_state.quiz_active = False
+                        st.success("✅ Vector store cleared! Please re-upload your documents.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error clearing vector store: {e}")
+            
+            with col_debug2:
+                if st.button("📋 Show Vector Store Info", help="Debug what documents are in the vector store"):
+                    try:
+                        km = get_knowledge_manager()
+                        stats = km.get_stats()
+                        sources = km.get_sources() if hasattr(km, 'get_sources') else []
+                        st.write("**Current Vector Store:**")
+                        st.write(f"Documents: {stats.get('doc_count', 0)}")
+                        st.write(f"Chunks: {stats.get('chunk_count', 0)}")
+                        st.write(f"Sources: {sources}")
+                    except Exception as e:
+                        st.error(f"Error getting vector store info: {e}")
         
         if api_key:
-            os.environ["OPENAI_API_KEY"] = api_key
+            st.session_state["openai_api_key"] = api_key
             
-            # File upload section
-            st.subheader("Upload Documents")
-            uploaded_files = st.file_uploader(
-                "Choose files to build your knowledge base",
-                accept_multiple_files=True,
-                type=['pdf', 'txt', 'docx'],
-                help="Upload PDFs, text files, or Word documents (max 200MB per file)",
-                key="file_uploader"
-            )
+            # Upload section
+            st.subheader("📄 Upload Documents")
+            uploaded_files = st.file_uploader("Choose files", type=['pdf', 'txt', 'docx'], accept_multiple_files=True, key="file_uploader")
+            
+            km = st.session_state.knowledge_manager
+            if km is None:
+                st.error("❌ Knowledge Manager not available. Please refresh the page.")
+                st.stop()
             
             if uploaded_files:
-                # Check file sizes and duplicates
-                large_files = []
-                duplicate_files = []
                 new_files = []
+                for uploaded_file in uploaded_files:
+                    if not km.is_file_already_processed(uploaded_file):
+                        new_files.append(uploaded_file)
                 
-                for file in uploaded_files:
-                    file_size_mb = len(file.getvalue()) / (1024 * 1024)
-                    if file_size_mb > 200:
-                        large_files.append(f"{file.name} ({file_size_mb:.1f}MB)")
-                    
-                    # Check for duplicates
-                    if st.session_state.knowledge_manager.is_file_already_processed(file):
-                        duplicate_files.append(file.name)
-                    else:
-                        new_files.append(file.name)
-                
-                if large_files:
-                    st.warning(f"⚠️ The following files exceed 200MB limit: {', '.join(large_files)}")
-                    st.info("Please use smaller files or split large documents into chunks.")
+                if new_files:
+                    st.info(f"📝 {len(new_files)} new file(s) ready to process")
                 else:
-                    # Show file info with duplicate detection
-                    with st.expander("📁 Selected Files"):
-                        if new_files:
-                            st.success(f"**New files to process ({len(new_files)}):**")
-                            for file_name in new_files:
-                                file_size_mb = len([f for f in uploaded_files if f.name == file_name][0].getvalue()) / (1024 * 1024)
-                                st.write(f"✅ {file_name} ({file_size_mb:.1f}MB)")
-                        
-                        if duplicate_files:
-                            st.info(f"**Already processed ({len(duplicate_files)}):**")
-                            for file_name in duplicate_files:
-                                st.write(f"🔄 {file_name} (will be skipped)")
-                    
-                    if st.button("📖 Build Knowledge Base", type="primary"):
-                        with st.spinner("Processing documents..."):
-                            try:
-                                result = st.session_state.knowledge_manager.process_documents(uploaded_files)
-                                
-                                if result['success']:
-                                    st.session_state.quiz_bot = QuizBot(st.session_state.knowledge_manager)
-                                    st.session_state.chat_bot = ChatBot(st.session_state.knowledge_manager)
-                                    
-                                    # Show detailed results
-                                    if result['new_files'] > 0:
-                                        st.success(f"✅ {result['message']}")
-                                    
-                                    if result['skipped_files'] > 0:
-                                        st.info(f"ℹ️ Skipped {result['skipped_files']} already processed files: {', '.join(result['skipped_list'])}")
-                                    
-                                    if result['new_files'] == 0 and result['skipped_files'] > 0:
-                                        st.info("All selected files were already in your knowledge base!")
-                                        
-                                else:
-                                    st.error(f"❌ {result['message']}")
-                                    if 'error' in result:
-                                        st.error(f"Details: {result['error']}")
-                                        
-                            except Exception as e:
-                                st.error(f"Error processing documents: {str(e)}")
-                                st.info("💡 Try uploading one file at a time or check if the file is corrupted.")
+                    st.success("✅ All uploaded files have already been processed")
+            
+            if st.button("📖 Build Knowledge Base", disabled=not uploaded_files):
+                with st.spinner("Processing documents..."):
+                    result = km.process_documents(uploaded_files)
+                    if result['success']:
+                        st.success(f"✅ {result['message']}")
+                        if km.retriever:
+                            st.session_state.chat_bot = ChatAgent(km.retriever)
             
             # Mode selection
             if st.session_state.quiz_bot or st.session_state.chat_bot:
@@ -291,7 +407,7 @@ def main():
                     
                     # Document selection
                     if st.session_state.chat_bot:
-                        available_docs = st.session_state.chat_bot.get_available_documents()
+                        available_docs = get_available_documents(st.session_state.knowledge_manager)
                         
                         if available_docs:
                             doc_options = {doc['name']: doc['id'] for doc in available_docs}
@@ -355,6 +471,9 @@ def main():
                             st.session_state.quiz_active = True
                             st.session_state.chat_active = False
                             st.session_state.score = {'correct': 0, 'total': 0}
+                            st.session_state.quiz_type = quiz_type
+                            st.session_state.difficulty = difficulty
+                            st.session_state.num_questions = num_questions
                             st.rerun()
                     
                     with col2:
@@ -375,7 +494,11 @@ def main():
     elif st.session_state.chat_active:
         show_chat_interface()
     elif st.session_state.quiz_active:
-        show_quiz_interface(quiz_type, difficulty, num_questions)
+        show_quiz_interface(
+            st.session_state.get("quiz_type", "Multiple Choice"),
+            st.session_state.get("difficulty", "Easy"),
+            st.session_state.get("num_questions", 10)
+        )
     else:
         show_knowledge_base_info()
 
@@ -432,8 +555,8 @@ def show_upload_prompt():
             # Create sample content
             sample_content = create_sample_content()
             st.session_state.knowledge_manager.process_text_content(sample_content)
-            st.session_state.quiz_bot = QuizBot(st.session_state.knowledge_manager)
-            st.session_state.chat_bot = ChatBot(st.session_state.knowledge_manager)
+            st.session_state.quiz_bot = QuizAgent(st.session_state.knowledge_manager.retriever)
+            st.session_state.chat_bot = ChatAgent(st.session_state.knowledge_manager.retriever)
             st.success("Demo content loaded! Ready to chat or quiz!")
             st.rerun()
 
@@ -460,8 +583,11 @@ def show_quiz_interface(quiz_type, difficulty, num_questions):
     if not st.session_state.current_question:
         with st.spinner("Generating question..."):
             st.session_state.current_question = st.session_state.quiz_bot.generate_question(
-                question_type=quiz_type.lower().replace(' ', '_'),
-                difficulty=difficulty.lower()
+                api_key=st.session_state.get('openai_api_key', ''),
+                model=st.session_state.get('selected_model', 'gpt-3.5-turbo'),
+                base_url=st.session_state.get('openai_base_url', None),
+                question_type=quiz_type,
+                difficulty=difficulty
             )
     
     if st.session_state.current_question:
@@ -591,25 +717,37 @@ def show_knowledge_base_info():
     
     if st.session_state.knowledge_manager:
         # Check preload status
-        preload_status = st.session_state.knowledge_manager.get_preload_status()
+        preload_status = get_preload_status(st.session_state.knowledge_manager)
         
         if preload_status['is_preloaded']:
             st.success("🚀 Knowledge base preloaded from previous session!")
         
-        stats = st.session_state.knowledge_manager.get_stats()
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Documents", stats['doc_count'])
-        with col2:
-            st.metric("Text Chunks", stats['chunk_count'])
-        with col3:
-            st.metric("Total Characters", f"{stats['total_chars']:,}")
-        with col4:
-            st.metric("Avg Chunk Size", stats['avg_chunk_size'])
+        # Knowledge Base Status
+        st.subheader("📊 Knowledge Base Status")
+        try:
+            km = get_knowledge_manager() 
+            stats = km.get_stats()
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("📄 Documents", stats['doc_count'])
+            with col2:
+                st.metric("🧩 Chunks", stats['chunk_count'])
+            with col3:
+                st.metric("📝 Characters", f"{stats['total_chars']:,}")
+            with col4:
+                avg_size = stats.get('avg_chunk_size', 0)
+                st.metric("📏 Avg Chunk Size", f"{avg_size}")
+        except Exception as e:
+            st.warning(f"Could not load knowledge base status: {e}")
         
         # Processed files management
-        processed_files = st.session_state.knowledge_manager.get_processed_files_details()
+        try:
+            km = get_knowledge_manager()
+            processed_files = km.get_processed_files_details()
+        except:
+            processed_files = []
+            
         if processed_files:
             st.subheader("📄 Processed Documents")
             
@@ -627,11 +765,15 @@ def show_knowledge_base_info():
                         
                         # Remove file button
                         if st.button(f"🗑️ Remove", key=f"remove_{file_info['file_hash']}", help="Remove this file from knowledge base"):
-                            if st.session_state.knowledge_manager.remove_processed_file(file_info['file_hash']):
-                                st.success(f"Removed {file_info['filename']}")
-                                st.rerun()
-                            else:
-                                st.error("Failed to remove file")
+                            try:
+                                km = get_knowledge_manager()
+                                if km.remove_processed_file(file_info['file_hash']):
+                                    st.success(f"Removed {file_info['filename']}")
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to remove file")
+                            except Exception as e:
+                                st.error(f"Error removing file: {e}")
         
         # Management actions
         st.subheader("🔧 Management Actions")
@@ -640,28 +782,40 @@ def show_knowledge_base_info():
         with col1:
             if st.button("🔄 Rebuild Vector Database"):
                 with st.spinner("Rebuilding..."):
-                    if st.session_state.knowledge_manager.rebuild_vectorstore():
-                        st.success("Vector database rebuilt successfully!")
-                    else:
-                        st.error("Failed to rebuild vector database")
+                    try:
+                        km = get_knowledge_manager()
+                        if km.rebuild_vectorstore():
+                            st.success("Vector database rebuilt successfully!")
+                        else:
+                            st.error("Failed to rebuild vector database")
+                    except Exception as e:
+                        st.error(f"Error rebuilding: {e}")
         
         with col2:
             if st.button("🗑️ Clear All Data"):
                 if st.checkbox("I understand this will delete all processed documents", key="confirm_clear"):
-                    st.session_state.knowledge_manager.clear_knowledge_base()
-                    st.session_state.quiz_bot = None
-                    st.success("Knowledge base cleared!")
-                    st.rerun()
+                    try:
+                        km = get_knowledge_manager()
+                        km.clear_knowledge_base()
+                        st.session_state.quiz_bot = None
+                        st.success("Knowledge base cleared!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error clearing data: {e}")
         
         with col3:
             if st.button("📊 Export Data"):
-                export_data = st.session_state.knowledge_manager.export_knowledge_base()
-                st.download_button(
-                    "💾 Download Export",
-                    data=json.dumps(export_data, indent=2),
-                    file_name=f"knowledge_base_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json"
-                )
+                try:
+                    km = get_knowledge_manager()
+                    export_data = km.export_knowledge_base()
+                    st.download_button(
+                        "💾 Download Export",
+                        data=json.dumps(export_data, indent=2),
+                        file_name=f"knowledge_base_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json"
+                    )
+                except Exception as e:
+                    st.error(f"Error exporting data: {e}")
         
         # Ready to quiz section
         st.markdown("### Ready to start your quiz! 🎯")
@@ -670,11 +824,39 @@ def show_knowledge_base_info():
         # Show sample questions preview
         with st.expander("🔍 Preview Sample Questions"):
             if st.button("Generate Preview"):
-                sample_q = st.session_state.quiz_bot.generate_question("multiple_choice", "medium")
-                if sample_q:
-                    st.markdown(f"**Sample Question:** {sample_q['question']}")
-                    for i, option in enumerate(sample_q.get('options', []), 1):
-                        st.markdown(f"{i}. {option}")
+                if st.session_state.quiz_bot:
+                    sample_q = st.session_state.quiz_bot.generate_question(
+                        api_key=st.session_state.get('openai_api_key', ''),
+                        model=st.session_state.get('selected_model', 'gpt-3.5-turbo'),
+                        base_url=st.session_state.get('openai_base_url', None),
+                        question_type="multiple_choice",
+                        difficulty="medium"
+                    )
+                    if sample_q:
+                        st.markdown(f"**Sample Question:** {sample_q['question']}")
+                        for i, option in enumerate(sample_q.get('options', []), 1):
+                            st.markdown(f"{i}. {option}")
+                    else:
+                        st.warning("Could not generate sample question")
+                else:
+                    st.warning("Quiz bot not available. Please ensure documents are loaded and API key is set.")
+        
+        # Demo button
+        with col3:
+            if st.button("🎮 Try Demo", help="Load sample content to test the application"):
+                with st.spinner("Loading demo content..."):
+                    try:
+                        sample_content = demo_content["ai_ml"]
+                        km = get_knowledge_manager()
+                        km.process_text_content(sample_content)
+                        if km.retriever:
+                            st.session_state.quiz_bot = QuizAgent(km.retriever)
+                            st.session_state.chat_bot = ChatAgent(km.retriever)
+                            st.success("✅ Demo content loaded successfully!")
+                        else:
+                            st.error("Failed to create retriever from demo content")
+                    except Exception as e:
+                        st.error(f"Failed to load demo content: {str(e)}")
     
     else:
         st.info("No knowledge base loaded yet.")
@@ -741,7 +923,10 @@ def show_chat_interface():
                             result = st.session_state.chat_bot.generate_response(
                                 starter, 
                                 st.session_state.selected_documents,
-                                st.session_state.chat_history[:-1]  # Exclude the just-added message
+                                st.session_state.chat_history[:-1],  # Exclude the just-added message
+                                api_key=st.session_state.get("openai_api_key", ""),
+                                base_url=st.session_state.get("openai_base_url", ""),
+                                model=st.session_state.get("selected_model", "GPT-4o-mini")
                             )
                             
                             if result['success']:
@@ -777,7 +962,10 @@ def show_chat_interface():
             result = st.session_state.chat_bot.generate_response(
                 user_input, 
                 st.session_state.selected_documents,
-                st.session_state.chat_history[:-1]  # Exclude the just-added message
+                st.session_state.chat_history[:-1],  # Exclude the just-added message
+                api_key=st.session_state.get("openai_api_key", ""),
+                base_url=st.session_state.get("openai_base_url", ""),
+                model=st.session_state.get("selected_model", "gpt-3.5-turbo")
             )
             
             if result['success']:

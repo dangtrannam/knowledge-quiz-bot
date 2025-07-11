@@ -17,7 +17,7 @@ class ChatAgent:
         """
         # Use LiteLLMProvider for chat completions
         # Search for relevant context
-        search_results = self.retriever.similarity_search(user_message, k=5)
+        search_results = self.retriever.similarity_search(user_message, k=5, selected_documents=selected_documents)
         if not search_results:
             return {'success': False, 'error': 'No relevant content found in the selected documents.'}
         # Prepare context from search results

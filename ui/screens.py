@@ -239,9 +239,6 @@ def show_navbar(
         if st_session_state.quiz_bot:
             show_quiz_interface(
                 st_session_state,
-                st_session_state.get("quiz_type", "Multiple Choice"),
-                st_session_state.get("difficulty", "Easy"),
-                st_session_state.get("num_questions", 5),
                 handle_answer_submission
             )
         else:

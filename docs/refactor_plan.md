@@ -45,11 +45,21 @@ knowledge-quiz-chatbot/
     __init__.py
     quiz_agent.py
     chat_agent.py
+  llm/
+    __init__.py
+    base.py
+    openai_llm.py
+    gemini_llm.py
+    tts.py
+    stt.py
+    embedding.py
+    utils.py
   ui/
     __init__.py
     streamlit_ui.py
     utils.py
   prompts/
+    __init__.py
     chat_prompt.py
     quiz_prompt.py
   tests/
@@ -66,14 +76,15 @@ knowledge-quiz-chatbot/
 ## 3. Refactor Plan
 
 ### Step 1: Create Folders and Move Code
-- Create the folders: `loaders/`, `embeddings/`, `vectorstores/`, `retrievers/`, `chains/`, `agents/`, `ui/`, `prompts/`, `tests/`.
+- Create the folders: `loaders/`, `embeddings/`, `vectorstores/`, `retrievers/`, `chains/`, `agents/`, `llm/`, `ui/`, `prompts/`, `tests/`.
 - Move and split code:
   - **Document loading/splitting** → `loaders/document_loader.py`
   - **Embedding logic** → `embeddings/embedding_model.py`
   - **Vector store management** → `vectorstores/chroma_store.py`
   - **Retriever logic** → `retrievers/vector_retriever.py`
   - **Quiz and chat agent logic** → `agents/quiz_agent.py`, `agents/chat_agent.py`
-  - **Prompt templates** → `prompts/`
+  - **Prompt templates** → `prompts/` (centralize all prompt templates here)
+  - **LLM, embedding, TTS, STT providers** → `llm/` (abstract all model/provider logic here)
   - **UI helpers** → `ui/`
   - **Tests** → `tests/`
 
@@ -87,9 +98,20 @@ knowledge-quiz-chatbot/
 - Use `python-dotenv` and `pydantic` for validation.
 
 ### Step 4: Centralize Prompts
-- Move all prompt templates to `prompts/` and use `ChatPromptTemplate`.
+- Move all prompt templates to `prompts/` and use `ChatPromptTemplate` or similar pattern.
+- Refactor all agent, chain, and UI code to import and use prompt templates from the `prompts/` folder, not inline or hardcoded strings.
 
-### Step 5: Testing and Validation
+### Step 5: Add LLM Module for Model Abstraction
+- Create an `llm/` module with the following structure:
+  - `base.py`: Abstract base classes/interfaces for LLM, embedding, TTS, STT providers.
+  - `openai_llm.py`, `gemini_llm.py`: Provider-specific implementations.
+  - `embedding.py`: Embedding model abstraction.
+  - `tts.py`, `stt.py`: Text-to-speech and speech-to-text abstraction.
+  - `utils.py`: Shared utilities.
+- Refactor agent and chain code to use the `llm/` module for all LLM, embedding, TTS, and STT calls.
+- Centralize API key/config management in this module.
+
+### Step 6: Testing and Validation
 - Move and update tests to `tests/`.
 - Ensure all tests pass after refactor.
 
@@ -106,7 +128,9 @@ knowledge-quiz-chatbot/
 
 ## 5. Next Steps
 
-- Optionally, break down each module into more granular tasks.
+- Break down each module into more granular tasks as needed.
 - Begin with folder creation and incremental migration of logic.
+- Refactor prompt template usage to the `prompts/` folder.
+- Add and integrate the `llm/` module for model abstraction.
 - Test after each major refactor step.
 - Update documentation and diagrams as you go. 

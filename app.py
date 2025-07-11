@@ -8,9 +8,16 @@ from agents.chat_agent import ChatAgent
 from ui.utils import setup_page_config, load_css
 from dotenv import load_dotenv
 import logging
+from llm.litellm_provider import LiteLLMProvider
+from services.agent_manager import initialize_agents, initialize_llm_provider
+from ui.knowledge_base import show_knowledge_base_info
+from ui.chat import show_chat_interface
+from ui.quiz import show_quiz_interface, handle_answer_submission
+from constants import PROVIDER_OPTIONS, PROVIDER_DEFAULTS, DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_MODEL_INPUT_TYPE
+import sys
 
 logging.basicConfig(
-    level=logging.INFO,  # Change to DEBUG for more detail
+    level=logging.DEBUG,  # Change to DEBUG for more detail
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 
@@ -116,48 +123,41 @@ def get_available_documents(km):
         })
     return documents
 
+def initialize_session_state():
+    defaults = {
+        'quiz_bot': None,
+        'chat_bot': None,
+        'knowledge_manager': None,
+        'quiz_active': False,
+        'chat_active': False,
+        'current_question': None,
+        'score': {'correct': 0, 'total': 0},
+        'chat_history': [],
+        'selected_documents': ['all'],
+        'openai_base_url': "https://aiportalapi.stu-platform.live/jpe",
+        'selected_model': "GPT-4o-mini",
+        'model_input_type': "predefined",
+        'custom_model': ""
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
 def main():
     setup_page_config()
     load_css()
-    
-    # Initialize session state
-    if 'quiz_bot' not in st.session_state:
-        st.session_state.quiz_bot = None
-    if 'chat_bot' not in st.session_state:
-        st.session_state.chat_bot = None
-    if 'knowledge_manager' not in st.session_state:
+    initialize_session_state()
+    # --- KnowledgeManager initialization with debug ---
+    if "knowledge_manager" not in st.session_state or st.session_state.knowledge_manager is None:
+        logging.debug("[DEBUG] Initializing KnowledgeManager and assigning to st.session_state.knowledge_manager")
+        import traceback
         try:
             st.session_state.knowledge_manager = KnowledgeManager()
-            # Check if embeddings are working
-            if hasattr(st.session_state.knowledge_manager, 'embedder'):
-                if not st.session_state.knowledge_manager.embedder.is_ready():
-                    st.warning("⚠️ Embedding model failed to initialize. Some features may not work properly.")
-                    st.info("💡 Try refreshing the page or check your system's torch/CUDA installation.")
+            logging.debug("[DEBUG] KnowledgeManager initialized successfully")
         except Exception as e:
-            st.error(f"❌ Failed to initialize Knowledge Manager: {str(e)}")
-            st.info("💡 Try refreshing the page. If the problem persists, check system requirements.")
-            # Initialize with a placeholder to prevent repeated errors
+            logging.error(f"[ERROR] Failed to initialize KnowledgeManager: {e}", exc_info=True)
+            traceback.print_exc()
             st.session_state.knowledge_manager = None
-    if 'quiz_active' not in st.session_state:
-        st.session_state.quiz_active = False
-    if 'chat_active' not in st.session_state:
-        st.session_state.chat_active = False
-    if 'current_question' not in st.session_state:
-        st.session_state.current_question = None
-    if 'score' not in st.session_state:
-        st.session_state.score = {'correct': 0, 'total': 0}
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
-    if 'selected_documents' not in st.session_state:
-        st.session_state.selected_documents = ['all']
-    if 'openai_base_url' not in st.session_state:
-        st.session_state.openai_base_url = "https://aiportalapi.stu-platform.live/jpe"
-    if 'selected_model' not in st.session_state:
-        st.session_state.selected_model = "GPT-4o-mini"
-    if 'model_input_type' not in st.session_state:
-        st.session_state.model_input_type = "predefined"
-    if 'custom_model' not in st.session_state:
-        st.session_state.custom_model = ""
     
     # Header
     st.title("🧠 Knowledge Quiz Bot")
@@ -166,38 +166,6 @@ def main():
     # Sidebar for configuration
     with st.sidebar:
         st.header("📚 Knowledge Base")
-        
-        # Show preload status
-        if st.session_state.knowledge_manager:
-            preload_status = get_preload_status(st.session_state.knowledge_manager)
-            if preload_status['is_preloaded']:
-                st.success("🚀 Preloaded from previous session")
-                st.caption(f"📁 {preload_status['processed_files_count']} files ready")
-                # Initialize agents with credentials
-                try:
-                    km = get_knowledge_manager()
-                    if km.retriever:
-                        st.session_state.quiz_bot = QuizAgent(km.retriever)
-                        st.session_state.chat_bot = ChatAgent(km.retriever)
-                        # Don't automatically activate modes - let user choose
-                    else:
-                        st.warning("⚠️ No documents loaded. Please upload and process documents first.")
-                except Exception as e:
-                    st.error(f"Failed to initialize agents: {e}")
-            elif preload_status['processed_files_count'] > 0:
-                st.info("📚 Knowledge base available")
-                # Initialize agents for demo mode
-                try:
-                    km = get_knowledge_manager()
-                    if km.retriever:
-                        st.session_state.quiz_bot = QuizAgent(km.retriever)
-                        st.session_state.chat_bot = ChatAgent(km.retriever)
-                        # Don't automatically activate modes - let user choose
-                    else:
-                        st.warning("⚠️ No documents loaded. Please upload and process documents first.")
-                except Exception as e:
-                    st.error(f"Failed to initialize agents: {e}")
-        
         # API Configuration
         st.subheader("🔧 API Configuration")
         
@@ -209,123 +177,89 @@ def main():
         
         # Advanced API settings in an expander
         with st.expander("⚙️ Advanced Settings"):
+            # Provider selection
+            provider = st.selectbox(
+                "Provider",
+                PROVIDER_OPTIONS,
+                index=PROVIDER_OPTIONS.index(st.session_state["llm_provider_choice"]) if "llm_provider_choice" in st.session_state else 0,
+                key="llm_provider_choice",
+                help="Choose your LLM provider. This will update model and base URL defaults."
+            )
+            defaults = PROVIDER_DEFAULTS.get(provider or "OpenAI", PROVIDER_DEFAULTS["OpenAI"])
+            predefined_models = defaults["models"]
+
+            # Base URL
             base_url = st.text_input(
                 "Base URL (Optional)",
-                value=st.session_state.openai_base_url,
-                placeholder="https://aiportalapi.stu-platform.live/jpe",
-                help="Custom base URL for OpenAI-compatible APIs (leave empty for default)",
+                value=st.session_state["openai_base_url"] if "openai_base_url" in st.session_state else defaults["base_url"],
+                placeholder=defaults["base_url"],
+                help=f"Custom base URL for {provider} (leave empty for default)",
+                key="llm_api_base"
             )
-            
+
             # Model selection type
             model_input_type = st.radio(
                 "Model Selection",
                 options=["predefined", "custom"],
                 format_func=lambda x: "📋 Select from List" if x == "predefined" else "✏️ Custom Model",
                 horizontal=True,
-                help="Choose to select from predefined models or enter a custom model name"
+                help="Choose to select from predefined models or enter a custom model name",
+                key="llm_model_input_type"
             )
-            
+
             # Model selection based on type
             if model_input_type == "predefined":
-                predefined_models = [
-                    'GPT-4o-mini',
-                    "gpt-3.5-turbo",
-                    "gpt-4o",
-                    "gpt-4o-mini",
-                ]
-                
-                # Ensure current model is in the list or default to first option
                 current_model_index = 0
-                if st.session_state.selected_model in predefined_models:
-                    current_model_index = predefined_models.index(st.session_state.selected_model)
-                
+                if st.session_state.get("selected_model", predefined_models[0]) in predefined_models:
+                    current_model_index = predefined_models.index(st.session_state.get("selected_model", predefined_models[0]))
                 selected_model = st.selectbox(
                     "AI Model",
                     options=predefined_models,
                     index=current_model_index,
-                    help="Choose the AI model to use for generation"
+                    help=f"Choose the {provider} model to use for generation",
+                    key="llm_model"
                 )
-                
-                # Update session state
                 st.session_state.selected_model = selected_model
                 st.session_state.custom_model = ""
-                
             else:  # custom model
                 custom_model = st.text_input(
                     "Custom Model Name",
-                    value=st.session_state.custom_model,
+                    value=st.session_state.get("custom_model", ""),
                     placeholder="e.g., gpt-4-1106-preview, claude-3-opus, custom-model-name",
-                    help="Enter the exact model name as expected by your API"
+                    help="Enter the exact model name as expected by your API",
+                    key="llm_custom_model"
                 )
-                
-                # Show helpful examples
-                st.info("""
-                💡 **Custom Model Examples:**
-                
-                **OpenAI Models:**
-                • `gpt-4-1106-preview` (Latest GPT-4 Turbo)
-                • `gpt-4-vision-preview` (GPT-4 with vision)
-                • `gpt-3.5-turbo-1106` (Latest GPT-3.5)
-                
-                **Other APIs (with custom base URL):**
-                • `claude-3-opus-20240229` (Anthropic)
-                • `claude-3-sonnet-20240229` (Anthropic)
-                • `mistral-large-latest` (Mistral AI)
-                • `llama-2-70b-chat` (Local/Ollama)
-                
-                **Note:** Make sure your API endpoint supports the model you specify.
-                """)
-                
+                st.info(f"\n💡 **Custom Model Examples for {provider}:**\n" + "\n".join(f"• {m}" for m in defaults["models"]))
                 if custom_model and custom_model.strip():
                     selected_model = custom_model.strip()
                     st.session_state.selected_model = selected_model
                     st.session_state.custom_model = custom_model.strip()
-                    
-                    # Basic validation and warnings
                     if ' ' in selected_model:
                         st.warning("⚠️ Model names usually don't contain spaces. Please check your model name.")
-                    elif selected_model.startswith('gpt') and not any(x in selected_model for x in ['3.5', '4']):
-                        st.info("ℹ️ Make sure this is a valid GPT model variant.")
                     elif len(selected_model) < 3:
                         st.warning("⚠️ Model name seems too short. Please verify it's correct.")
                 else:
-                    # Fallback to default if custom model is empty
-                    selected_model = "gpt-3.5-turbo"
+                    selected_model = predefined_models[0]
                     st.session_state.selected_model = selected_model
-                    if not custom_model:  # Only clear if completely empty
+                    if not custom_model:
                         st.session_state.custom_model = ""
-            
-            # Update session state
+
             st.session_state.openai_base_url = base_url
             st.session_state.model_input_type = model_input_type
-            
-            # Show current settings
+
+            st.caption(f"**Current Provider:** {provider}")
             st.caption(f"**Current Model:** {selected_model}")
-            if model_input_type == "custom" and selected_model:
-                if selected_model in ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo", "gpt-4o", "gpt-4o-mini"]:
-                    st.caption("ℹ️ This looks like a standard model - you could use the predefined list")
-                else:
-                    st.caption("✏️ Using custom model")
-            
-            if base_url:
-                st.caption(f"**Base URL:** {base_url}")
-            else:
-                st.caption("**Base URL:** Default (OpenAI)")
-            
-            # Reset configuration button
-            if st.button("🔄 Reset AI Configuration", help="Clear cached clients and reinitialize with new settings"):
-                # Clear cached clients by resetting bot instances
-                if st.session_state.chat_bot:
-                    st.session_state.chat_bot.client = None
-                    st.session_state.chat_bot._last_config = None
-                if st.session_state.quiz_bot:
-                    st.session_state.quiz_bot.llm = None
-                    st.session_state.quiz_bot._last_config = None
-                # Reset model configuration to defaults
+            st.caption(f"**Base URL:** {base_url if base_url else defaults['base_url']}")
+
+            if st.button("🔄 Reset AI Configuration", help="Clear cached LLM providers and reinitialize with new settings"):
+                if st.session_state.chat_bot is not None:
+                    st.session_state.chat_bot.llm_provider = None
+                if st.session_state.quiz_bot is not None:
+                    st.session_state.quiz_bot.llm_provider = None
                 st.session_state.model_input_type = "predefined"
-                st.session_state.selected_model = "GPT-4o-mini"
+                st.session_state.selected_model = defaults["models"][0]
                 st.session_state.custom_model = ""
-                st.session_state.openai_base_url = ""
+                st.session_state.openai_base_url = defaults["base_url"]
                 st.success("🔄 AI configuration reset to defaults! Changes will take effect on next use.")
                 st.rerun()
             
@@ -389,7 +323,7 @@ def main():
                     if result['success']:
                         st.success(f"✅ {result['message']}")
                         if km.retriever:
-                            st.session_state.chat_bot = ChatAgent(km.retriever)
+                            initialize_agents(st.session_state, km)
             
             # Mode selection
             if st.session_state.quiz_bot or st.session_state.chat_bot:
@@ -483,7 +417,55 @@ def main():
                             st.session_state.score = {'correct': 0, 'total': 0}
                             st.rerun()
         
+        # --- Preload status and agent initialization ---
+        logging.debug("[DEBUG] Preload status and agent initialization: start")
+        if st.session_state.knowledge_manager:
+            logging.debug("[DEBUG] st.session_state.knowledge_manager exists")
+            try:
+                preload_status = get_preload_status(st.session_state.knowledge_manager)
+                logging.debug(f"[DEBUG] Preload status: {preload_status}")
+            except Exception as e:
+                logging.error(f"[ERROR] Exception in get_preload_status: {e}", exc_info=True)
+                st.error(f"❌ Exception in get_preload_status: {e}")
+                st.session_state.knowledge_manager = None
+                return
+            if preload_status['is_preloaded']:
+                st.success("🚀 Preloaded from previous session")
+                st.caption(f"📁 {preload_status['processed_files_count']} files ready")
+                # Initialize agents with LiteLLMProvider using all selected settings
+                try:
+                    logging.debug("[DEBUG] About to call get_knowledge_manager() in is_preloaded block")
+                    km = get_knowledge_manager()
+                    logging.debug(f"[DEBUG] get_knowledge_manager() returned: {km}")
+                    logging.debug("[DEBUG] About to call initialize_agents() in is_preloaded block")
+                    initialize_agents(st.session_state, km)
+                    logging.debug("[DEBUG] initialize_agents() completed in is_preloaded block")
+                    # Don't automatically activate modes - let user choose
+                except Exception as e:
+                    logging.error(f"KnowledgeManager initialization error in is_preloaded block: {e}", exc_info=True)
+                    with open("km_init_error.log", "a") as f:
+                        f.write(f"KnowledgeManager initialization error in is_preloaded block: {e}\n")
+                    st.error(f"❌ Failed to initialize Knowledge Manager: {str(e)}")
+                    st.info("💡 Try refreshing the page. If the problem persists, check system requirements.")
+                    st.session_state.knowledge_manager = None
+            elif preload_status['processed_files_count'] > 0:
+                st.info("📚 Knowledge base available")
+                # Initialize agents for demo mode
+                try:
+                    logging.debug("[DEBUG] About to call get_knowledge_manager() in processed_files_count > 0 block")
+                    km = get_knowledge_manager()
+                    logging.debug(f"[DEBUG] get_knowledge_manager() returned: {km}")
+                    logging.debug("[DEBUG] About to call initialize_agents() in processed_files_count > 0 block")
+                    initialize_agents(st.session_state, km)
+                    logging.debug("[DEBUG] initialize_agents() completed in processed_files_count > 0 block")
+                    # Don't automatically activate modes - let user choose
+                except Exception as e:
+                    logging.error(f"Failed to initialize agents in processed_files_count > 0 block: {e}", exc_info=True)
+                    with open("km_init_error.log", "a") as f:
+                        f.write(f"Failed to initialize agents in processed_files_count > 0 block: {e}\n")
+                    st.error(f"Failed to initialize agents: {e}")
         else:
+            logging.debug("[DEBUG] st.session_state.knowledge_manager is None")
             st.warning("⚠️ Please enter your OpenAI API key to get started")
     
     # Main content area
@@ -492,15 +474,22 @@ def main():
     elif not st.session_state.quiz_bot and not st.session_state.chat_bot:
         show_upload_prompt()
     elif st.session_state.chat_active:
-        show_chat_interface()
+        show_chat_interface(st.session_state)
     elif st.session_state.quiz_active:
         show_quiz_interface(
+            st.session_state,
             st.session_state.get("quiz_type", "Multiple Choice"),
             st.session_state.get("difficulty", "Easy"),
-            st.session_state.get("num_questions", 10)
+            st.session_state.get("num_questions", 5),
+            handle_answer_submission
         )
     else:
-        show_knowledge_base_info()
+        show_knowledge_base_info(
+            st.session_state,
+            get_preload_status,
+            get_knowledge_manager,
+            demo_content
+        )
 
 def show_welcome_screen():
     st.markdown("""
@@ -555,460 +544,9 @@ def show_upload_prompt():
             # Create sample content
             sample_content = create_sample_content()
             st.session_state.knowledge_manager.process_text_content(sample_content)
-            st.session_state.quiz_bot = QuizAgent(st.session_state.knowledge_manager.retriever)
-            st.session_state.chat_bot = ChatAgent(st.session_state.knowledge_manager.retriever)
+            initialize_agents(st.session_state, st.session_state.knowledge_manager)
             st.success("Demo content loaded! Ready to chat or quiz!")
             st.rerun()
-
-def show_quiz_interface(quiz_type, difficulty, num_questions):
-    # Progress bar
-    progress = st.session_state.score['total'] / num_questions if num_questions > 0 else 0
-    st.progress(progress)
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Question", f"{st.session_state.score['total'] + 1}/{num_questions}")
-    with col2:
-        st.metric("Correct", st.session_state.score['correct'])
-    with col3:
-        accuracy = (st.session_state.score['correct'] / st.session_state.score['total'] * 100) if st.session_state.score['total'] > 0 else 0
-        st.metric("Accuracy", f"{accuracy:.1f}%")
-    
-    # Check if quiz is complete
-    if st.session_state.score['total'] >= num_questions:
-        show_quiz_results()
-        return
-    
-    # Generate or show current question
-    if not st.session_state.current_question:
-        with st.spinner("Generating question..."):
-            st.session_state.current_question = st.session_state.quiz_bot.generate_question(
-                api_key=st.session_state.get('openai_api_key', ''),
-                model=st.session_state.get('selected_model', 'gpt-3.5-turbo'),
-                base_url=st.session_state.get('openai_base_url', None),
-                question_type=quiz_type,
-                difficulty=difficulty
-            )
-    
-    if st.session_state.current_question:
-        question_data = st.session_state.current_question
-        
-        st.markdown(f"### Question {st.session_state.score['total'] + 1}")
-        st.markdown(f"**{question_data['question']}**")
-        
-        # Handle different question types
-        if question_data['type'] == 'multiple_choice':
-            answer = st.radio(
-                "Choose your answer:",
-                question_data['options'],
-                key=f"q_{st.session_state.score['total']}"
-            )
-            
-            if st.button("Submit Answer", type="primary"):
-                handle_answer_submission(answer, question_data)
-        
-        elif question_data['type'] == 'true_false':
-            answer = st.radio(
-                "Choose your answer:",
-                ["True", "False"],
-                key=f"q_{st.session_state.score['total']}"
-            )
-            
-            if st.button("Submit Answer", type="primary"):
-                handle_answer_submission(answer, question_data)
-        
-        elif question_data['type'] == 'short_answer':
-            answer = st.text_input(
-                "Your answer:",
-                key=f"q_{st.session_state.score['total']}"
-            )
-            
-            if st.button("Submit Answer", type="primary") and answer:
-                handle_answer_submission(answer, question_data)
-
-def handle_answer_submission(user_answer, question_data):
-    is_correct = st.session_state.quiz_bot.check_answer(user_answer, question_data)
-    
-    # Update score
-    st.session_state.score['total'] += 1
-    if is_correct:
-        st.session_state.score['correct'] += 1
-    
-    # Show feedback
-    if is_correct:
-        st.success("✅ Correct!")
-    else:
-        st.error("❌ Incorrect")
-        st.info(f"**Correct answer:** {question_data['correct_answer']}")
-    
-    # Show explanation
-    if 'explanation' in question_data:
-        with st.expander("💡 Explanation"):
-            st.markdown(question_data['explanation'])
-            if 'source' in question_data:
-                st.caption(f"Source: {question_data['source']}")
-    
-    # Reset for next question
-    st.session_state.current_question = None
-    
-    # Show balloons for correct answers
-    if is_correct:
-        st.balloons()
-    
-    if st.button("Next Question →"):
-        st.rerun()
-
-def show_quiz_results():
-    st.markdown("## 🎉 Quiz Complete!")
-    
-    score = st.session_state.score
-    percentage = (score['correct'] / score['total']) * 100
-    
-    # Results display
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Final Score", f"{score['correct']}/{score['total']}")
-    with col2:
-        st.metric("Percentage", f"{percentage:.1f}%")
-    with col3:
-        if percentage >= 90:
-            grade = "A+"
-            emoji = "🌟"
-        elif percentage >= 80:
-            grade = "A"
-            emoji = "🎯"
-        elif percentage >= 70:
-            grade = "B"
-            emoji = "👏"
-        elif percentage >= 60:
-            grade = "C"
-            emoji = "👍"
-        else:
-            grade = "D"
-            emoji = "💪"
-        st.metric("Grade", f"{grade} {emoji}")
-    
-    # Performance feedback
-    if percentage >= 90:
-        st.success("🌟 Outstanding! You've mastered this material!")
-    elif percentage >= 70:
-        st.info("🎯 Great job! You have a solid understanding.")
-    elif percentage >= 50:
-        st.warning("📚 Good effort! Consider reviewing the material again.")
-    else:
-        st.error("💪 Keep studying! Practice makes perfect.")
-    
-    # Action buttons
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔄 Take Another Quiz", type="primary"):
-            st.session_state.quiz_active = True
-            st.session_state.score = {'correct': 0, 'total': 0}
-            st.session_state.current_question = None
-            st.rerun()
-    
-    with col2:
-        if st.button("📊 View Knowledge Base"):
-            st.session_state.quiz_active = False
-            st.rerun()
-
-def show_knowledge_base_info():
-    st.markdown("## 📚 Knowledge Base Overview")
-    
-    if st.session_state.knowledge_manager:
-        # Check preload status
-        preload_status = get_preload_status(st.session_state.knowledge_manager)
-        
-        if preload_status['is_preloaded']:
-            st.success("🚀 Knowledge base preloaded from previous session!")
-        
-        # Knowledge Base Status
-        st.subheader("📊 Knowledge Base Status")
-        try:
-            km = get_knowledge_manager() 
-            stats = km.get_stats()
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("📄 Documents", stats['doc_count'])
-            with col2:
-                st.metric("🧩 Chunks", stats['chunk_count'])
-            with col3:
-                st.metric("📝 Characters", f"{stats['total_chars']:,}")
-            with col4:
-                avg_size = stats.get('avg_chunk_size', 0)
-                st.metric("📏 Avg Chunk Size", f"{avg_size}")
-        except Exception as e:
-            st.warning(f"Could not load knowledge base status: {e}")
-        
-        # Processed files management
-        try:
-            km = get_knowledge_manager()
-            processed_files = km.get_processed_files_details()
-        except:
-            processed_files = []
-            
-        if processed_files:
-            st.subheader("📄 Processed Documents")
-            
-            # Show files in a nice table format
-            for file_info in processed_files:
-                with st.expander(f"📁 {file_info['filename']} ({file_info['file_size_mb']} MB)"):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.write(f"**File Type:** {file_info['file_type'].upper()}")
-                        st.write(f"**Processed:** {file_info['processed_date'][:19]}")
-                        st.write(f"**Size:** {file_info['file_size_mb']} MB")
-                    with col2:
-                        st.write(f"**Chunks:** {file_info['chunk_count']}")
-                        st.write(f"**Hash:** {file_info['file_hash'][:12]}...")
-                        
-                        # Remove file button
-                        if st.button(f"🗑️ Remove", key=f"remove_{file_info['file_hash']}", help="Remove this file from knowledge base"):
-                            try:
-                                km = get_knowledge_manager()
-                                if km.remove_processed_file(file_info['file_hash']):
-                                    st.success(f"Removed {file_info['filename']}")
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to remove file")
-                            except Exception as e:
-                                st.error(f"Error removing file: {e}")
-        
-        # Management actions
-        st.subheader("🔧 Management Actions")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("🔄 Rebuild Vector Database"):
-                with st.spinner("Rebuilding..."):
-                    try:
-                        km = get_knowledge_manager()
-                        if km.rebuild_vectorstore():
-                            st.success("Vector database rebuilt successfully!")
-                        else:
-                            st.error("Failed to rebuild vector database")
-                    except Exception as e:
-                        st.error(f"Error rebuilding: {e}")
-        
-        with col2:
-            if st.button("🗑️ Clear All Data"):
-                if st.checkbox("I understand this will delete all processed documents", key="confirm_clear"):
-                    try:
-                        km = get_knowledge_manager()
-                        km.clear_knowledge_base()
-                        st.session_state.quiz_bot = None
-                        st.success("Knowledge base cleared!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error clearing data: {e}")
-        
-        with col3:
-            if st.button("📊 Export Data"):
-                try:
-                    km = get_knowledge_manager()
-                    export_data = km.export_knowledge_base()
-                    st.download_button(
-                        "💾 Download Export",
-                        data=json.dumps(export_data, indent=2),
-                        file_name=f"knowledge_base_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                        mime="application/json"
-                    )
-                except Exception as e:
-                    st.error(f"Error exporting data: {e}")
-        
-        # Ready to quiz section
-        st.markdown("### Ready to start your quiz! 🎯")
-        st.markdown("Configure your quiz settings in the sidebar and click **Start Quiz** when ready.")
-        
-        # Show sample questions preview
-        with st.expander("🔍 Preview Sample Questions"):
-            if st.button("Generate Preview"):
-                if st.session_state.quiz_bot:
-                    sample_q = st.session_state.quiz_bot.generate_question(
-                        api_key=st.session_state.get('openai_api_key', ''),
-                        model=st.session_state.get('selected_model', 'gpt-3.5-turbo'),
-                        base_url=st.session_state.get('openai_base_url', None),
-                        question_type="multiple_choice",
-                        difficulty="medium"
-                    )
-                    if sample_q:
-                        st.markdown(f"**Sample Question:** {sample_q['question']}")
-                        for i, option in enumerate(sample_q.get('options', []), 1):
-                            st.markdown(f"{i}. {option}")
-                    else:
-                        st.warning("Could not generate sample question")
-                else:
-                    st.warning("Quiz bot not available. Please ensure documents are loaded and API key is set.")
-        
-        # Demo button
-        with col3:
-            if st.button("🎮 Try Demo", help="Load sample content to test the application"):
-                with st.spinner("Loading demo content..."):
-                    try:
-                        sample_content = demo_content["ai_ml"]
-                        km = get_knowledge_manager()
-                        km.process_text_content(sample_content)
-                        if km.retriever:
-                            st.session_state.quiz_bot = QuizAgent(km.retriever)
-                            st.session_state.chat_bot = ChatAgent(km.retriever)
-                            st.success("✅ Demo content loaded successfully!")
-                        else:
-                            st.error("Failed to create retriever from demo content")
-                    except Exception as e:
-                        st.error(f"Failed to load demo content: {str(e)}")
-    
-    else:
-        st.info("No knowledge base loaded yet.")
-
-def show_chat_interface():
-    st.markdown("## 💬 Chat with Your Documents")
-    
-    if not st.session_state.chat_bot:
-        st.error("Chat bot not initialized. Please upload documents first.")
-        return
-    
-    # Show selected documents info
-    if st.session_state.selected_documents:
-        if 'all' in st.session_state.selected_documents:
-            st.info("💬 Chatting with **All Documents**")
-        else:
-            doc_names = []
-            processed_files = st.session_state.knowledge_manager.get_processed_files_details()
-            for doc_id in st.session_state.selected_documents:
-                for file_info in processed_files:
-                    if file_info['file_hash'] == doc_id:
-                        doc_names.append(file_info['filename'])
-                        break
-            if doc_names:
-                st.info(f"💬 Chatting with: **{', '.join(doc_names)}**")
-    
-    # Chat history display
-    chat_container = st.container()
-    
-    with chat_container:
-        if st.session_state.chat_history:
-            for i, message in enumerate(st.session_state.chat_history):
-                if message['role'] == 'user':
-                    with st.chat_message("user"):
-                        st.markdown(message['content'])
-                else:
-                    with st.chat_message("assistant"):
-                        st.markdown(message['content'])
-                        
-                        # Show sources if available
-                        if 'sources' in message and message['sources']:
-                            with st.expander("📚 Sources"):
-                                for source in message['sources']:
-                                    st.caption(f"• {source}")
-        else:
-            # Show conversation starters
-            st.markdown("### 🚀 Get Started")
-            st.markdown("Ask me anything about your documents! Here are some suggestions:")
-            
-            starters = st.session_state.chat_bot.get_conversation_starters(st.session_state.selected_documents)
-            
-            cols = st.columns(2)
-            for i, starter in enumerate(starters):
-                with cols[i % 2]:
-                    if st.button(starter, key=f"starter_{i}", use_container_width=True):
-                        # Add user message to history
-                        st.session_state.chat_history.append({
-                            'role': 'user',
-                            'content': starter
-                        })
-                        
-                        # Generate response
-                        with st.spinner("Thinking..."):
-                            result = st.session_state.chat_bot.generate_response(
-                                starter, 
-                                st.session_state.selected_documents,
-                                st.session_state.chat_history[:-1],  # Exclude the just-added message
-                                api_key=st.session_state.get("openai_api_key", ""),
-                                base_url=st.session_state.get("openai_base_url", ""),
-                                model=st.session_state.get("selected_model", "GPT-4o-mini")
-                            )
-                            
-                            if result['success']:
-                                # Add assistant response to history
-                                response_data = {
-                                    'role': 'assistant',
-                                    'content': result['response']
-                                }
-                                if 'sources' in result:
-                                    response_data['sources'] = result['sources']
-                                
-                                st.session_state.chat_history.append(response_data)
-                            else:
-                                st.session_state.chat_history.append({
-                                    'role': 'assistant',
-                                    'content': f"❌ {result['error']}"
-                                })
-                        
-                        st.rerun()
-    
-    # Chat input
-    user_input = st.chat_input("Ask me anything about your documents...")
-    
-    if user_input:
-        # Add user message to history
-        st.session_state.chat_history.append({
-            'role': 'user',
-            'content': user_input
-        })
-        
-        # Generate response
-        with st.spinner("Thinking..."):
-            result = st.session_state.chat_bot.generate_response(
-                user_input, 
-                st.session_state.selected_documents,
-                st.session_state.chat_history[:-1],  # Exclude the just-added message
-                api_key=st.session_state.get("openai_api_key", ""),
-                base_url=st.session_state.get("openai_base_url", ""),
-                model=st.session_state.get("selected_model", "gpt-3.5-turbo")
-            )
-            
-            if result['success']:
-                # Add assistant response to history
-                response_data = {
-                    'role': 'assistant',
-                    'content': result['response']
-                }
-                if 'sources' in result:
-                    response_data['sources'] = result['sources']
-                
-                st.session_state.chat_history.append(response_data)
-            else:
-                st.session_state.chat_history.append({
-                    'role': 'assistant',
-                    'content': f"❌ {result['error']}"
-                })
-        
-        st.rerun()
-    
-    # Chat controls in sidebar
-    with st.sidebar:
-        st.markdown("---")
-        st.subheader("💬 Chat Controls")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔄 New Chat"):
-                st.session_state.chat_history = []
-                st.rerun()
-        
-        with col2:
-            if st.button("📊 Back to Overview"):
-                st.session_state.chat_active = False
-                st.rerun()
-        
-        # Show chat stats
-        if st.session_state.chat_history:
-            st.markdown("### 📈 Chat Stats")
-            user_messages = len([m for m in st.session_state.chat_history if m['role'] == 'user'])
-            assistant_messages = len([m for m in st.session_state.chat_history if m['role'] == 'assistant'])
-            st.metric("Messages", f"{user_messages + assistant_messages}")
-            st.metric("Questions Asked", user_messages)
 
 def create_sample_content():
     return """

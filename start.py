@@ -74,7 +74,8 @@ def launch_streamlit():
             sys.executable, "-m", "streamlit", "run", "app.py",
             "--server.address", "localhost",
             "--server.port", "8501",
-            "--browser.gatherUsageStats", "false"
+            "--browser.gatherUsageStats", "false",
+            "--server.headless", "true" # no open browser
         ])
         
     except KeyboardInterrupt:

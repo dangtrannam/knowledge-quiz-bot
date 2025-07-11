@@ -30,7 +30,9 @@ class TestKnowledgeManager:
         It uses algorithms to find patterns in data.
         """
         with patch('embeddings.embedding_model.HuggingFaceEmbeddings') as mock_embeddings:
-            mock_embeddings.return_value = Mock()
+            mock_instance = Mock()
+            mock_instance.embed_query.return_value = [0.1, 0.2]
+            mock_embeddings.return_value = mock_instance
             with patch('vectorstores.chroma_store.Chroma') as mock_chroma:
                 mock_vectorstore = Mock()
                 mock_chroma.from_documents.return_value = mock_vectorstore

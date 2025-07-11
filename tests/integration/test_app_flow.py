@@ -3,8 +3,20 @@ import pytest
 from dotenv import load_dotenv
 from streamlit.testing.v1 import AppTest
 import io
+from unittest.mock import patch, Mock
+import sys
 
 load_dotenv()
+
+@pytest.fixture(autouse=True)
+def patch_litellm_provider():
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+    with patch('llm.litellm_provider.LiteLLMProvider.chat', return_value='mocked response'), \
+         patch('llm.litellm_provider.LiteLLMProvider.completion', return_value='{\"question\": \"Q?\", \"options\": [\"A\", \"B\", \"C\", \"D\"], \"correct_answer\": \"A\"}'), \
+         patch('embeddings.embedding_model.EmbeddingModel.get', return_value=Mock(embed_query=lambda x: [0.1, 0.2])), \
+         patch('vectorstores.chroma_store.ChromaStoreManager.create_from_documents', return_value=Mock()), \
+         patch('vectorstores.chroma_store.ChromaStoreManager.load_existing', return_value=Mock()):
+        yield
 
 def test_apptest_attributes():
     app_test = AppTest.from_file("app.py")
@@ -29,6 +41,9 @@ def test_file_upload_and_knowledge_base_load():
 
     # First run to initialize the app
     app_test.run()
+
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
 
     # Upload test.pdf
     test_pdf_path = os.path.join(os.path.dirname(__file__), "../../test.pdf")
@@ -135,6 +150,9 @@ def test_chat_flow_end_to_end():
     # Initialize app and load document
     app_test.run()
     
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
+
     # Upload and process document
     test_pdf_path = os.path.join(os.path.dirname(__file__), "../../test.pdf")
     class NamedBytesIO(io.BytesIO):
@@ -148,6 +166,9 @@ def test_chat_flow_end_to_end():
     app_test.session_state["file_uploader"] = [file_obj]
     app_test.run()
     
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
+    
     # Clear processed files and process document
     km = app_test.session_state["knowledge_manager"]
     if hasattr(km, 'processed_files'):
@@ -159,6 +180,9 @@ def test_chat_flow_end_to_end():
     # Switch to Chat mode and test chat interaction
     app_test.session_state["selected_mode"] = "💬 Chat"
     app_test.run()
+    
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
     
     # Simulate user chat message
     test_message = "What is this document about?"
@@ -205,6 +229,9 @@ def test_quiz_flow_end_to_end():
     # Initialize app and load document
     app_test.run()
     
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
+
     # Upload and process document
     test_pdf_path = os.path.join(os.path.dirname(__file__), "../../test.pdf")
     class NamedBytesIO(io.BytesIO):
@@ -218,6 +245,9 @@ def test_quiz_flow_end_to_end():
     app_test.session_state["file_uploader"] = [file_obj]
     app_test.run()
     
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
+    
     # Clear processed files and process document
     km = app_test.session_state["knowledge_manager"]
     if hasattr(km, 'processed_files'):
@@ -229,6 +259,9 @@ def test_quiz_flow_end_to_end():
     # Switch to Quiz mode and test quiz generation
     app_test.session_state["selected_mode"] = "📝 Quiz"
     app_test.run()
+    
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
     
     # Get quiz agent and test question generation
     try:
@@ -329,6 +362,9 @@ def test_session_state_persistence():
     # Run and check initialization
     app_test.run()
     
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
+    
     # Check that key components are initialized
     assert "knowledge_manager" in app_test.session_state
     
@@ -342,6 +378,9 @@ def test_session_state_persistence():
     
     app_test.session_state["selected_mode"] = "📝 Quiz" 
     app_test.run()
+    
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
     
     # Session state should maintain consistency
     assert "knowledge_manager" in app_test.session_state
@@ -366,6 +405,9 @@ def test_full_user_workflow():
     app_test.session_state["selected_model"] = model
     app_test.run()
     
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
+    
     # Step 2: User uploads document
     test_pdf_path = os.path.join(os.path.dirname(__file__), "../../test.pdf")
     class NamedBytesIO(io.BytesIO):
@@ -379,12 +421,18 @@ def test_full_user_workflow():
     app_test.session_state["file_uploader"] = [file_obj]
     app_test.run()
     
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
+    
     # Step 3: Process document
     km = app_test.session_state["knowledge_manager"]
     if hasattr(km, 'processed_files'):
         km.processed_files.clear()
     result = km.process_documents([file_obj])
     assert result['success']
+    
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
     
     # Step 4: User tries chat mode
     app_test.session_state["selected_mode"] = "💬 Chat"
@@ -400,6 +448,9 @@ def test_full_user_workflow():
         print("✅ Chat interaction successful")
     except Exception as e:
         print(f"Chat interaction failed: {e}")
+    
+    # Fast fail if knowledge_manager is not initialized
+    assert "knowledge_manager" in app_test.session_state and app_test.session_state["knowledge_manager"] is not None, "KnowledgeManager failed to initialize. Check for errors in app initialization."
     
     # Step 5: User tries quiz mode  
     app_test.session_state["selected_mode"] = "📝 Quiz"

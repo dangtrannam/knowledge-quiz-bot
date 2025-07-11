@@ -6,9 +6,10 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import random
 import logging
-from loaders.document_loader import DocumentLoader
+from services.metadata_manager import MetadataManager
+from services.document_processor import DocumentProcessor
+from services.vectorstore_service import VectorStoreService
 from embeddings.embedding_model import EmbeddingModel
-from vectorstores.chroma_store import ChromaStoreManager
 from retrievers.vector_retriever import VectorStoreRetriever
 
 class KnowledgeManager:
@@ -18,40 +19,19 @@ class KnowledgeManager:
     def __init__(self, persist_directory: str = "./chroma_db", metadata_file: str = "./processed_files.json"):
         self.persist_directory = persist_directory
         self.metadata_file = metadata_file
-        self.loader = DocumentLoader()
+        self.metadata_manager = MetadataManager(metadata_file)
+        self.document_processor = DocumentProcessor()
+        self.vectorstore_service = VectorStoreService(persist_directory)
         self.embedder = EmbeddingModel()
-        self.vectorstore_manager = ChromaStoreManager(persist_directory)
         self.documents = []
-        self.processed_files = {}
+        self.processed_files = self.metadata_manager.load_metadata()
         self.is_preloaded = False
         self.vectorstore = None
         self.retriever = None
-        self._load_metadata()
         self._preload_existing_documents()
     
-    def _load_metadata(self):
-        """Load metadata about processed files"""
-        try:
-            if os.path.exists(self.metadata_file):
-                with open(self.metadata_file, 'r', encoding='utf-8') as f:
-                    self.processed_files = json.load(f)
-                logging.info(f"Loaded metadata for {len(self.processed_files)} processed files")
-            else:
-                self.processed_files = {}
-                logging.info("No existing metadata found, starting fresh")
-        except Exception as e:
-            logging.error(f"Error loading metadata: {e}")
-            self.processed_files = {}
-    
     def _save_metadata(self):
-        """Save metadata about processed files"""
-        try:
-            os.makedirs(os.path.dirname(self.metadata_file) if os.path.dirname(self.metadata_file) else '.', exist_ok=True)
-            with open(self.metadata_file, 'w', encoding='utf-8') as f:
-                json.dump(self.processed_files, f, indent=2, ensure_ascii=False)
-            logging.info(f"Saved metadata for {len(self.processed_files)} processed files")
-        except Exception as e:
-            logging.error(f"Error saving metadata: {e}")
+        self.metadata_manager.save_metadata(self.processed_files)
     
     def _preload_existing_documents(self):
         """Preload existing vector database if available"""
@@ -71,7 +51,7 @@ class KnowledgeManager:
                 logging.warning(f"Embedding test failed during preload: {e}. Skipping vector store loading.")
                 return
             
-            self.vectorstore = self.vectorstore_manager.load_existing(embeddings)
+            self.vectorstore = self.vectorstore_service.load_existing(embeddings)
             if self.vectorstore:
                 self.is_preloaded = True
                 self.retriever = VectorStoreRetriever(self.vectorstore)
@@ -114,49 +94,23 @@ class KnowledgeManager:
             processed_count = 0
             
             for uploaded_file, file_hash in new_files:
-                # Save uploaded file temporarily
-                file_extension = uploaded_file.name.split('.')[-1]
-                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as tmp_file:
-                    tmp_file.write(uploaded_file.getbuffer())
-                    tmp_file_path = tmp_file.name
-                
-                try:
-                    # Load document based on file type
-                    documents = self.loader.load_document(tmp_file_path, uploaded_file.name)
-                    
-                    if documents:
-                        # Split documents into chunks
-                        texts = self.loader.split_documents(documents)
-                        
-                        # Add enhanced metadata
-                        current_time = datetime.now().isoformat()
-                        for text in texts:
-                            text.metadata.update({
-                                'source_file': uploaded_file.name,
-                                'file_hash': file_hash,
-                                'processed_date': current_time,
-                                'chunk_index': len(all_texts) + texts.index(text),
-                                'file_size': len(uploaded_file.getbuffer())
-                            })
-                        
-                        all_texts.extend(texts)
-                        
-                        # Update processed files metadata
-                        self.processed_files[file_hash] = {
-                            'filename': uploaded_file.name,
-                            'processed_date': current_time,
-                            'file_size': len(uploaded_file.getbuffer()),
-                            'chunk_count': len(texts),
-                            'file_type': file_extension.lower()
-                        }
-                        
-                        processed_count += 1
-                        logging.info(f"Processed file: {uploaded_file.name} ({len(texts)} chunks)")
-                        
-                finally:
-                    # Clean up temporary file
-                    if os.path.exists(tmp_file_path):
-                        os.unlink(tmp_file_path)
+                texts = self.document_processor.process_uploaded_file(uploaded_file)
+                if texts:
+                    current_time = datetime.now().isoformat()
+                    for text in texts:
+                        text.metadata.update({
+                            'file_hash': file_hash
+                        })
+                    all_texts.extend(texts)
+                    self.processed_files[file_hash] = {
+                        'filename': uploaded_file.name,
+                        'processed_date': current_time,
+                        'file_size': len(uploaded_file.getbuffer()),
+                        'chunk_count': len(texts),
+                        'file_type': uploaded_file.name.split('.')[-1].lower()
+                    }
+                    processed_count += 1
+                    logging.info(f"Processed file: {uploaded_file.name} ({len(texts)} chunks)")
             
             if all_texts:
                 # Create or update vector database
@@ -191,10 +145,10 @@ class KnowledgeManager:
                 # Create vector store
                 try:
                     if self.vectorstore is None:
-                        self.vectorstore = self.vectorstore_manager.create_from_documents(all_texts, embeddings)
+                        self.vectorstore = self.vectorstore_service.create_from_documents(all_texts, embeddings)
                     else:
-                        self.vectorstore_manager.add_documents(all_texts)
-                    self.vectorstore_manager.persist()
+                        self.vectorstore_service.add_documents(all_texts)
+                    self.vectorstore_service.persist()
                 except Exception as e:
                     logging.error(f"Failed to create/update vector store: {e}")
                     return {
@@ -260,13 +214,11 @@ class KnowledgeManager:
                 logging.error(f"Embedding test failed: {e}")
                 raise Exception(f"Embedding model is not working: {e}")
             
-            from langchain.schema import Document
-            document = Document(page_content=text_content, metadata={"source": source_name})
-            texts = self.loader.split_documents([document])
+            texts = self.document_processor.process_text_content(text_content, source_name)
             
             # Create vector store with error handling
             try:
-                self.vectorstore = self.vectorstore_manager.create_from_documents(texts, embeddings)
+                self.vectorstore = self.vectorstore_service.create_from_documents(texts, embeddings)
                 self.documents = texts
                 self.retriever = VectorStoreRetriever(self.vectorstore, self.documents)
                 logging.info(f"Successfully processed text content: {len(texts)} chunks created")
@@ -488,7 +440,7 @@ class KnowledgeManager:
                 shutil.rmtree(self.persist_directory)
             
             # Recreate vectorstore
-            self.vectorstore = self.vectorstore_manager.create_from_documents(self.documents, self.embedder.get())
+            self.vectorstore = self.vectorstore_service.create_from_documents(self.documents, self.embedder.get())
             
             logging.info("Successfully rebuilt vectorstore")
             return True

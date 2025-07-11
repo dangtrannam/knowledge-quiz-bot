@@ -2,42 +2,23 @@ import os
 from dotenv import load_dotenv
 import logging
 from typing import List, Dict, Any, Optional
-from openai import OpenAI
-from openai.types.chat import ChatCompletionMessageParam
+from llm.litellm_provider import LiteLLMProvider
+from prompts.chat_prompt import chat_prompt
 load_dotenv()
 
 class ChatAgent:
     """
     Agent for generating chat responses based on retrieved document context and LLM.
     """
-    def __init__(self, retriever):
+    def __init__(self, retriever, llm_provider: LiteLLMProvider):
         self.retriever = retriever
-        self.client = None
-        self._last_config = None
+        self.llm_provider = llm_provider
 
-    def _get_openai_client(self, api_key: str, base_url: Optional[str] = None, model: str = 'gpt-3.5-turbo') -> Optional[OpenAI]:
-        try:
-            logging.debug(f"_get_openai_client called with api_key: {repr(api_key)}, base_url: {repr(base_url)}, model: {repr(model)}")
-            if not api_key:
-                logging.error(f"OPENAI_API_KEY not provided. Received api_key: {repr(api_key)}")
-                raise ValueError("OPENAI_API_KEY not provided.")
-            if base_url and isinstance(base_url, str) and base_url.strip():
-                self.client = OpenAI(api_key=api_key, base_url=base_url.strip())
-            else:
-                self.client = OpenAI(api_key=api_key)
-            self._last_config = (api_key, base_url, model)
-            return self.client
-        except Exception as e:
-            logging.error(f"Failed to initialize OpenAI client: {e}")
-            return None
-
-    def generate_response(self, user_message: str, selected_documents: List[str], chat_history: Optional[List[Dict[str, Any]]] = None, api_key: str = '', base_url: Optional[str] = None, model: str = 'gpt-3.5-turbo') -> Dict[str, Any]:
+    def generate_response(self, user_message: str, selected_documents: List[str], chat_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
         Generate AI response based on user message and selected documents.
         """
-        client = self._get_openai_client(api_key, base_url, model)
-        if not client:
-            return {'success': False, 'error': 'OpenAI client not initialized. Please check your API key.'}
+        # Use LiteLLMProvider for chat completions
         # Search for relevant context
         search_results = self.retriever.similarity_search(user_message, k=5)
         if not search_results:
@@ -67,26 +48,41 @@ class ChatAgent:
             history_context = "\n".join(history_parts)
         # Document selection context
         doc_context = "all available documents" if 'all' in selected_documents else "selected documents"
-        # Create system prompt
-        system_prompt = f"""You are a helpful AI assistant that answers questions based on provided documents.\n\nThe user is asking about content from: {doc_context}\n\nRules:\n1. Answer based ONLY on the provided context from the documents\n2. If the context doesn't contain enough information to answer the question, say so\n3. Be specific and cite which document your information comes from when possible\n4. Maintain conversational tone while being informative\n5. If asked about something not in the documents, politely redirect to document content\n\nAvailable context from documents:\n{context}"""
-        messages: List[ChatCompletionMessageParam] = [
-            {"role": "system", "content": system_prompt},
-        ]
-        if history_context:
-            messages.append({"role": "system", "content": f"Recent conversation context:\n{history_context}"})
-        messages.append({"role": "user", "content": user_message})
+        # Use chat_prompt to construct messages
+        prompt_inputs = {
+            "doc_context": doc_context,
+            "context": context,
+            "history_context": history_context,
+            "user_message": user_message
+        }
+        # Convert LangChain BaseMessage objects to OpenAI API message dicts
+        lc_messages = chat_prompt.format_messages(**prompt_inputs)
+        messages = []
+        for msg in lc_messages:
+            # Map LangChain message types to OpenAI roles
+            if hasattr(msg, 'type'):
+                if msg.type == 'system':
+                    role = 'system'
+                elif msg.type == 'human':
+                    role = 'user'
+                elif msg.type == 'ai':
+                    role = 'assistant'
+                elif msg.type == 'tool':
+                    role = 'tool'
+                else:
+                    role = msg.type
+            else:
+                role = 'user'
+            messages.append({"role": role, "content": msg.content})
         # Generate response
         try:
-            logging.info(f"Generating response with model: {model}")
+            logging.info(f"Generating response with model: {self.llm_provider.model}")
             logging.info(f"Messages: {messages}")
-            response = client.chat.completions.create(
-                model=model,
+            answer = self.llm_provider.chat(
                 messages=messages,
                 temperature=0.7,
                 max_tokens=1000
             )
-            logging.info(f"Response: {response}")
-            answer = response.choices[0].message.content
             return {'success': True, 'response': answer, 'sources': list(sources)}
         except Exception as e:
             logging.error(f"Error generating chat response: {e}")

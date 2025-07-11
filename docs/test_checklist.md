@@ -92,6 +92,61 @@
 - [ ] Large file uploads
 - [ ] Concurrent user sessions
 
+## E2E Testing Plan: Playwright (UI/Browser Automation)
+
+**Goal:**
+- Prevent runtime UI/session state errors (e.g., Streamlit key collisions, widget/session state mismatches, unhandled exceptions)
+- Validate all critical user flows and error handling in a real browser environment
+
+### Playwright E2E Test Coverage
+
+- [ ] **App Launch & Smoke Test**
+  - Launch app, verify no uncaught exceptions or Streamlit errors in UI
+  - Check for presence of main UI elements (sidebar, chat, quiz, upload)
+
+- [ ] **Widget/Session State Collision Detection**
+  - Interact with all sidebar widgets (provider/model/API key inputs)
+  - Change provider/model, verify no Streamlit session state errors appear
+  - Attempt to trigger known collision scenarios (e.g., set widget and session state with same key)
+  - Assert no StreamlitAPIException is shown in UI
+
+- [ ] **File Upload & Document Processing**
+  - Upload valid PDF, TXT, DOCX files
+  - Upload large file (>10MB) and verify processing or error message
+  - Upload invalid/corrupt file, verify graceful error
+
+- [ ] **Chat Flow**
+  - Enter user message, select documents, submit
+  - Verify LLM response is shown, no UI errors
+  - Test with missing/invalid API key, verify error message
+  - Test with empty knowledge base, verify error message
+
+- [ ] **Quiz Flow**
+  - Start quiz, answer questions, submit answers
+  - Verify scoring, feedback, and no UI errors
+  - Test adaptive difficulty and edge cases (no context, LLM failure)
+
+- [ ] **Session State & Mode Switching**
+  - Switch between chat and quiz modes repeatedly
+  - Upload new files, switch modes, verify state is preserved and no errors
+  - Simulate concurrent sessions (multiple browser tabs)
+
+- [ ] **Error Handling & Recovery**
+  - Simulate network/API failures (disconnect, invalid endpoint)
+  - Remove/revoke API key mid-session, verify error handling
+  - Trigger LLM/embedding/model errors, verify fallback UI
+
+- [ ] **UI Consistency & Regression**
+  - Check for UI regressions after code changes (visual snapshots)
+  - Verify all buttons, inputs, and outputs are present and functional
+
+### Playwright Implementation Notes
+- Use Playwright's test runner for parallel browser sessions
+- Use selectors for all critical UI elements (sidebar, chat input, quiz controls)
+- Capture and assert on browser console errors (fail test if StreamlitAPIException or uncaught error appears)
+- Use Playwright's screenshot and trace features for debugging failures
+- Integrate E2E tests into CI pipeline for every PR/merge
+
 ---
 
 **Instructions:**

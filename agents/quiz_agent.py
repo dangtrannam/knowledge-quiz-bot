@@ -1,16 +1,9 @@
-import os
-from dotenv import load_dotenv
 import json
-import random
 import re
-from typing import Dict, List, Any, Optional
-from langchain_openai import ChatOpenAI
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+from typing import Dict, Any
 import logging
 from llm.litellm_provider import LiteLLMProvider
 from prompts.quiz_prompt import quiz_prompt
-load_dotenv()
 
 class QuizAgent:
     """

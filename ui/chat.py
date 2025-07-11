@@ -10,12 +10,19 @@ def show_chat_interface(session_state):
             st.info("💬 Chatting with **All Documents**")
         else:
             doc_names = []
-            processed_files = session_state.knowledge_manager.get_processed_files_details()
+            # Group documents by file_hash and extract filenames from chunk metadata
+            from collections import defaultdict
+            file_groups = defaultdict(list)
+            for doc in getattr(session_state.knowledge_manager, 'documents', []):
+                meta = getattr(doc, 'metadata', {})
+                file_id = meta.get('file_hash') or meta.get('source_file') or meta.get('original_filename') or 'Unknown'
+                file_groups[file_id].append(doc)
             for doc_id in session_state.selected_documents:
-                for file_info in processed_files:
-                    if file_info['file_hash'] == doc_id:
-                        doc_names.append(file_info['filename'])
-                        break
+                docs = file_groups.get(doc_id, [])
+                if docs:
+                    meta = docs[0].metadata
+                    filename = meta.get('source_file') or meta.get('original_filename') or 'Unknown'
+                    doc_names.append(filename)
             if doc_names:
                 st.info(f"💬 Chatting with: **{', '.join(doc_names)}**")
     chat_container = st.container()
@@ -90,21 +97,3 @@ def show_chat_interface(session_state):
                     'content': f"❌ {result['error']}"
                 })
         st.rerun()
-    with st.sidebar:
-        st.markdown("---")
-        st.subheader("💬 Chat Controls")
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔄 New Chat"):
-                session_state.chat_history = []
-                st.rerun()
-        with col2:
-            if st.button("📊 Back to Overview"):
-                session_state.chat_active = False
-                st.rerun()
-        if session_state.chat_history:
-            st.markdown("### 📈 Chat Stats")
-            user_messages = len([m for m in session_state.chat_history if m['role'] == 'user'])
-            assistant_messages = len([m for m in session_state.chat_history if m['role'] == 'assistant'])
-            st.metric("Messages", f"{user_messages + assistant_messages}")
-            st.metric("Questions Asked", user_messages) 

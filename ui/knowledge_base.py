@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from agents.quiz_agent import QuizAgent
 from agents.chat_agent import ChatAgent
+from collections import defaultdict
 
 def show_knowledge_base_info(session_state, get_preload_status, get_knowledge_manager, demo_content):
     st.markdown("## 📚 Knowledge Base Overview")
@@ -28,8 +29,25 @@ def show_knowledge_base_info(session_state, get_preload_status, get_knowledge_ma
             st.warning(f"Could not load knowledge base status: {e}")
         try:
             km = get_knowledge_manager()
-            processed_files = km.get_processed_files_details()
-        except:
+            # Group documents by file using metadata
+            file_groups = defaultdict(list)
+            for doc in km.documents:
+                meta = getattr(doc, 'metadata', {})
+                file_id = meta.get('file_hash') or meta.get('source_file') or meta.get('original_filename') or 'Unknown'
+                file_groups[file_id].append(doc)
+            processed_files = []
+            for file_id, docs in file_groups.items():
+                meta = docs[0].metadata if docs else {}
+                processed_files.append({
+                    'file_hash': file_id,
+                    'filename': meta.get('source_file') or meta.get('original_filename') or 'Unknown',
+                    'processed_date': meta.get('processed_date', 'Unknown'),
+                    'file_size': meta.get('file_size', 0),
+                    'file_size_mb': round(meta.get('file_size', 0) / (1024 * 1024), 2),
+                    'chunk_count': len(docs),
+                    'file_type': meta.get('file_type', 'unknown')
+                })
+        except Exception as e:
             processed_files = []
         if processed_files:
             st.subheader("📄 Processed Documents")
@@ -46,11 +64,11 @@ def show_knowledge_base_info(session_state, get_preload_status, get_knowledge_ma
                         if st.button(f"🗑️ Remove", key=f"remove_{file_info['file_hash']}", help="Remove this file from knowledge base"):
                             try:
                                 km = get_knowledge_manager()
-                                if km.remove_processed_file(file_info['file_hash']):
-                                    st.success(f"Removed {file_info['filename']}")
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to remove file")
+                                # Remove all docs with this file_hash from km.documents and Chroma
+                                # (Assumes a remove_documents_by_file method or similar, or just filter in memory)
+                                km.documents = [doc for doc in km.documents if (doc.metadata.get('file_hash') or doc.metadata.get('source_file') or doc.metadata.get('original_filename')) != file_info['file_hash']]
+                                st.success(f"Removed {file_info['filename']}")
+                                st.rerun()
                             except Exception as e:
                                 st.error(f"Error removing file: {e}")
         st.subheader("🔧 Management Actions")
@@ -67,16 +85,16 @@ def show_knowledge_base_info(session_state, get_preload_status, get_knowledge_ma
                     except Exception as e:
                         st.error(f"Error rebuilding: {e}")
         with col2:
-            if st.button("🗑️ Clear All Data"):
-                if st.checkbox("I understand this will delete all processed documents", key="confirm_clear"):
-                    try:
-                        km = get_knowledge_manager()
-                        km.clear_knowledge_base()
-                        session_state.quiz_bot = None
-                        st.success("Knowledge base cleared!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error clearing data: {e}")
+            confirm_clear = st.checkbox("I understand this will delete all processed documents", key="confirm_clear")
+            if st.button("🗑️ Clear All Data", disabled=not confirm_clear):
+                try:
+                    km = get_knowledge_manager()
+                    km.clear_knowledge_base()
+                    session_state.quiz_bot = None
+                    st.success("Knowledge base cleared!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error clearing data: {e}")
         with col3:
             if st.button("📊 Export Data"):
                 try:
@@ -107,20 +125,5 @@ def show_knowledge_base_info(session_state, get_preload_status, get_knowledge_ma
                         st.warning("Could not generate sample question")
                 else:
                     st.warning("Quiz bot not available. Please ensure documents are loaded and API key is set.")
-        with col3:
-            if st.button("🎮 Try Demo", help="Load sample content to test the application"):
-                with st.spinner("Loading demo content..."):
-                    try:
-                        sample_content = demo_content["ai_ml"]
-                        km = get_knowledge_manager()
-                        km.process_text_content(sample_content)
-                        if km.retriever:
-                            session_state.quiz_bot = QuizAgent(km.retriever, session_state.llm_provider_obj)
-                            session_state.chat_bot = ChatAgent(km.retriever, session_state.llm_provider_obj)
-                            st.success("✅ Demo content loaded successfully!")
-                        else:
-                            st.error("Failed to create retriever from demo content")
-                    except Exception as e:
-                        st.error(f"Failed to load demo content: {str(e)}")
     else:
         st.info("No knowledge base loaded yet.") 

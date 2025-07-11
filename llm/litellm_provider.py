@@ -8,7 +8,7 @@ class LiteLLMProvider(LLMBase):
     """
     LLM provider using LiteLLM for unified access to OpenAI, Gemini, Anthropic, Ollama, etc.
     """
-    def __init__(self, api_key: Optional[str] = None, api_base: Optional[str] = None, model: str = "openai/gpt-3.5-turbo"):
+    def __init__(self, api_key: Optional[str] = None, api_base: Optional[str] = None, model: str = "openai/gpt-4o-mini"):
         self.api_key = api_key
         self.api_base = api_base
         self.model = model

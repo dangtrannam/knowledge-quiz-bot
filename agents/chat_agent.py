@@ -1,10 +1,7 @@
-import os
-from dotenv import load_dotenv
 import logging
 from typing import List, Dict, Any, Optional
 from llm.litellm_provider import LiteLLMProvider
 from prompts.chat_prompt import chat_prompt
-load_dotenv()
 
 class ChatAgent:
     """

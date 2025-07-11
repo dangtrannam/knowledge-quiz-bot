@@ -13,8 +13,13 @@ class DocumentProcessor:
             tmp_file_path = tmp_file.name
         try:
             documents = self.loader.load_document(tmp_file_path, uploaded_file.name)
+            import logging
+            logging.info(f"[Loader] {uploaded_file.name}: Loaded {len(documents)} document(s) (should match PDF pages)")
             if documents:
                 texts = self.loader.split_documents(documents)
+                logging.info(f"[Splitter] {uploaded_file.name}: Split into {len(texts)} chunk(s)")
+                for i, chunk in enumerate(texts):
+                    logging.info(f"[Splitter] Chunk {i}: {chunk.page_content[:80]}... | Metadata: {chunk.metadata}")
                 current_time = datetime.now().isoformat()
                 for text in texts:
                     text.metadata.update({

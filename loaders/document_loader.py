@@ -1,5 +1,5 @@
 from typing import List, Any
-from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
+from langchain_community.document_loaders import TextLoader, Docx2txtLoader, UnstructuredPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import logging
 
@@ -7,7 +7,7 @@ class DocumentLoader:
     """
     Handles loading documents from files and splitting them into chunks for processing.
     """
-    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
+    def __init__(self, chunk_size: int = 300, chunk_overlap: int = 100):
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
@@ -22,7 +22,7 @@ class DocumentLoader:
         file_extension = original_filename.split('.')[-1].lower()
         try:
             if file_extension == 'pdf':
-                loader = PyPDFLoader(file_path)
+                loader = UnstructuredPDFLoader(file_path)
             elif file_extension == 'txt':
                 loader = TextLoader(file_path, encoding='utf-8')
             elif file_extension in ['docx', 'doc']:

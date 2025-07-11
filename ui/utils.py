@@ -1,5 +1,6 @@
 import streamlit as st
 from typing import Optional
+from collections import defaultdict
 
 def setup_page_config():
     """Configure Streamlit page settings"""
@@ -119,3 +120,41 @@ def display_progress_bar(current: int, total: int, label: str = "Progress"):
             </div>
         </div>
         """, unsafe_allow_html=True) 
+
+def get_preload_status(km):
+    return {
+        'is_preloaded': getattr(km, 'is_preloaded', False),
+        'processed_files_count': len(getattr(km, 'processed_files', {})),
+        'processed_files': list(getattr(km, 'processed_files', {}).keys()),
+        'vectorstore_available': getattr(km, 'vectorstore', None) is not None,
+        'embeddings_ready': getattr(getattr(km, 'embedder', None), 'get', lambda: None)() is not None
+    }
+
+def get_available_documents(km):
+    # Group documents by file using metadata
+    file_groups = defaultdict(list)
+    for doc in getattr(km, 'documents', []):
+        meta = getattr(doc, 'metadata', {})
+        file_id = meta.get('file_hash') or meta.get('source_file') or meta.get('original_filename') or 'Unknown'
+        file_groups[file_id].append(doc)
+    documents = []
+    documents.append({
+        'id': 'all',
+        'name': '📚 All Documents',
+        'description': f'Chat with all {len(file_groups)} documents'
+    })
+    for file_id, docs in file_groups.items():
+        meta = docs[0].metadata if docs else {}
+        documents.append({
+            'id': file_id,
+            'name': f"📄 {meta.get('source_file') or meta.get('original_filename') or 'Unknown'}",
+            'description': f"{meta.get('file_type', '').upper()} • {len(docs)} chunks • {round(meta.get('file_size', 0) / (1024 * 1024), 2)} MB"
+        })
+    return documents
+
+def get_knowledge_manager():
+    km = st.session_state.get('knowledge_manager')
+    if km is None:
+        st.error("❌ Knowledge Manager not available. Please refresh the page.")
+        st.stop()
+    return km 

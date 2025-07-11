@@ -9,7 +9,7 @@ def initialize_llm_provider(session_state):
     Initialize and return a LiteLLMProvider based on session state config.
     """
     provider = session_state.get("llm_provider_choice", "openai")
-    model = session_state.get("selected_model", "gpt-3.5-turbo")
+    model = session_state.get("selected_model", "gpt-4o-mini")
     api_key = session_state.get("openai_api_key", "")
     base_url = session_state.get("openai_base_url", "")
     model_with_prefix = f"{provider.lower()}/{model}"

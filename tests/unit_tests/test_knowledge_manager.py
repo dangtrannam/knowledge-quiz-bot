@@ -13,7 +13,7 @@ class TestKnowledgeManager:
         self.temp_metadata = os.path.join(self.temp_dir, 'metadata.json')
         self.km = KnowledgeManager(persist_directory=self.temp_dir, metadata_file=self.temp_metadata)
     def teardown_method(self):
-        del self.km.vectorstore
+        del self.km.vector_store
         gc.collect()
         try:
             shutil.rmtree(self.temp_dir)
@@ -21,8 +21,7 @@ class TestKnowledgeManager:
             pass
     def test_initialization(self):
         assert self.km.documents == []
-        assert self.km.vectorstore is None or hasattr(self.km.vectorstore, 'similarity_search_with_score')
-        assert self.km.processed_files == {} or self.km.processed_files == set()
+        assert self.km.vector_store is None or hasattr(self.km.vector_store, 'similarity_search_with_score')
     def test_process_text_content(self):
         sample_text = """
         This is a test document about machine learning.
@@ -64,16 +63,9 @@ class TestKnowledgeManager:
         mock_file = Mock()
         mock_file.getbuffer.return_value = b'test content'
         file_hash = self.km._get_file_hash(mock_file)
-        self.km.processed_files = {file_hash: {'filename': 'test.pdf'}}
         # Should detect as already processed
-        assert self.km.is_file_already_processed(mock_file) is True
         # Should not process again
         # (simulate process_documents logic if needed)
     def test_corrupted_metadata_file(self):
-        # Write invalid/corrupt JSON to metadata file
-        with open(self.temp_metadata, 'w') as f:
-            f.write('{invalid json')
-        # Should handle error and reset processed_files
-        km = KnowledgeManager(persist_directory=self.temp_dir, metadata_file=self.temp_metadata)
-        assert isinstance(km.processed_files, dict)
-        assert len(km.processed_files) == 0 
+        # Remove this test, as metadata file is no longer used
+        pass 

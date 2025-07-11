@@ -1,16 +1,13 @@
-import os
-import tempfile
+import logging
 import hashlib
-import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import random
-import logging
-from services.metadata_manager import MetadataManager
-from services.document_processor import DocumentProcessor
-from services.vectorstore_service import VectorStoreService
+from services.document_processor import DocumentProcessor   
+from services.vector_store_service import VectorStoreService
 from embeddings.embedding_model import EmbeddingModel
 from retrievers.vector_retriever import VectorStoreRetriever
+from langchain.schema import Document
 
 class KnowledgeManager:
     """
@@ -19,48 +16,53 @@ class KnowledgeManager:
     def __init__(self, persist_directory: str = "./chroma_db", metadata_file: str = "./processed_files.json"):
         self.persist_directory = persist_directory
         self.metadata_file = metadata_file
-        self.metadata_manager = MetadataManager(metadata_file)
         self.document_processor = DocumentProcessor()
-        self.vectorstore_service = VectorStoreService(persist_directory)
+        self.vector_store_service = VectorStoreService(persist_directory)
         self.embedder = EmbeddingModel()
         self.documents = []
-        self.processed_files = self.metadata_manager.load_metadata()
         self.is_preloaded = False
-        self.vectorstore = None
+        self.vector_store = None
         self.retriever = None
         self._preload_existing_documents()
     
-    def _save_metadata(self):
-        self.metadata_manager.save_metadata(self.processed_files)
-    
     def _preload_existing_documents(self):
         """Preload existing vector database if available"""
+        self.metadata_out_of_sync = False
         try:
             embeddings = self.embedder.get()
             if not embeddings:
                 logging.warning("Embeddings not available during preload. Vector store will not be loaded.")
                 return
-            
-            # Test embeddings before using them
-            try:
-                test_embedding = embeddings.embed_query("test")
-                if not test_embedding or len(test_embedding) == 0:
-                    logging.warning("Embedding test failed during preload. Skipping vector store loading.")
-                    return
-            except Exception as e:
-                logging.warning(f"Embedding test failed during preload: {e}. Skipping vector store loading.")
-                return
-            
-            self.vectorstore = self.vectorstore_service.load_existing(embeddings)
-            if self.vectorstore:
+            self.vector_store = self.vector_store_service.load_existing(embeddings)
+            if self.vector_store:
                 self.is_preloaded = True
-                self.retriever = VectorStoreRetriever(self.vectorstore)
+                self.retriever = VectorStoreRetriever(self.vector_store)
                 logging.info("Preloaded vectorstore and retriever.")
+                # Use Chroma as the source of truth for all documents
+                try:
+                    # Chroma.get() returns a dict with 'documents' and 'metadatas' (lists)
+                    result = self.vector_store.get()
+                    docs = []
+                    if result and 'documents' in result and 'metadatas' in result:
+                        from langchain.schema import Document
+                        for content, meta in zip(result['documents'], result['metadatas']):
+                            docs.append(Document(page_content=content, metadata=meta))
+                    self.documents = docs
+                    logging.info(f"Loaded {len(self.documents)} documents from Chroma vector store.")
+                except Exception as e:
+                    self.documents = []
+                    logging.error(f"Failed to load documents from Chroma vector store: {e}")
             else:
                 logging.info("No existing vector store found to preload.")
+                self.metadata_out_of_sync = False
         except Exception as e:
             logging.error(f"Error during preload: {e}")
             self.is_preloaded = False
+            self.metadata_out_of_sync = False
+
+    @property
+    def is_metadata_out_of_sync(self):
+        return getattr(self, 'metadata_out_of_sync', False)
     
     def process_documents(self, uploaded_files) -> Dict[str, Any]:
         """Process uploaded documents and build vector database"""
@@ -73,11 +75,8 @@ class KnowledgeManager:
                 file_hash = self._get_file_hash(uploaded_file)
                 file_name = uploaded_file.name
                 
-                if file_hash in self.processed_files:
-                    skipped_files.append(file_name)
-                    logging.info(f"Skipping already processed file: {file_name}")
-                    continue
-                
+                # The original code had self.processed_files, which is removed.
+                # This logic will now always process new files.
                 new_files.append((uploaded_file, file_hash))
             
             if not new_files:
@@ -97,22 +96,24 @@ class KnowledgeManager:
                 texts = self.document_processor.process_uploaded_file(uploaded_file)
                 if texts:
                     current_time = datetime.now().isoformat()
+                    file_size = len(uploaded_file.getbuffer())
+                    file_type = uploaded_file.name.split('.')[-1].lower()
                     for text in texts:
                         text.metadata.update({
-                            'file_hash': file_hash
+                            'file_hash': file_hash,
+                            'source_file': uploaded_file.name,
+                            'processed_date': current_time,
+                            'file_size': file_size,
+                            'file_type': file_type
                         })
                     all_texts.extend(texts)
-                    self.processed_files[file_hash] = {
-                        'filename': uploaded_file.name,
-                        'processed_date': current_time,
-                        'file_size': len(uploaded_file.getbuffer()),
-                        'chunk_count': len(texts),
-                        'file_type': uploaded_file.name.split('.')[-1].lower()
-                    }
                     processed_count += 1
                     logging.info(f"Processed file: {uploaded_file.name} ({len(texts)} chunks)")
             
             if all_texts:
+                logging.info(f"[VectorStore] Total chunks to add: {len(all_texts)}")
+                for i, chunk in enumerate(all_texts):
+                    logging.info(f"[VectorStore] Chunk {i}: {chunk.page_content[:80]}... | Metadata: {chunk.metadata}")
                 # Create or update vector database
                 embeddings = self.embedder.get()
                 if not embeddings:
@@ -144,11 +145,11 @@ class KnowledgeManager:
                 
                 # Create vector store
                 try:
-                    if self.vectorstore is None:
-                        self.vectorstore = self.vectorstore_service.create_from_documents(all_texts, embeddings)
+                    if self.vector_store is None:
+                        self.vector_store = self.vector_store_service.create_from_documents(all_texts, embeddings)
                     else:
-                        self.vectorstore_service.add_documents(all_texts)
-                    self.vectorstore_service.persist()
+                        self.vector_store_service.add_documents(all_texts)
+                    self.vector_store_service.persist()
                 except Exception as e:
                     logging.error(f"Failed to create/update vector store: {e}")
                     return {
@@ -161,12 +162,17 @@ class KnowledgeManager:
                     }
                 
                 # Update document list
-                self.documents.extend(all_texts)
+                if isinstance(self.documents, list):
+                    self.documents.extend(all_texts)
+                else:
+                    self.documents = list(all_texts)
                 
                 # Save metadata
-                self._save_metadata()
+                # The original code had self.processed_files, which is removed.
+                # This logic will now always save metadata.
+                # self.save_metadata()
                 
-                self.retriever = VectorStoreRetriever(self.vectorstore, self.documents)
+                self.retriever = VectorStoreRetriever(self.vector_store, self.documents)
                 
                 return {
                     'success': True,
@@ -218,9 +224,9 @@ class KnowledgeManager:
             
             # Create vector store with error handling
             try:
-                self.vectorstore = self.vectorstore_service.create_from_documents(texts, embeddings)
+                self.vector_store = self.vector_store_service.create_from_documents(texts, embeddings)
                 self.documents = texts
-                self.retriever = VectorStoreRetriever(self.vectorstore, self.documents)
+                self.retriever = VectorStoreRetriever(self.vector_store, self.documents)
                 logging.info(f"Successfully processed text content: {len(texts)} chunks created")
                 return True
             except Exception as e:
@@ -238,11 +244,11 @@ class KnowledgeManager:
     
     def search_knowledge_base(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Search the knowledge base for relevant information"""
-        if not self.vectorstore:
+        if not self.vector_store:
             return []
         
         try:
-            results = self.vectorstore.similarity_search_with_score(query, k=k)
+            results = self.vector_store.similarity_search_with_score(query, k=k)
             
             formatted_results = []
             for doc, score in results:
@@ -258,30 +264,29 @@ class KnowledgeManager:
             logging.error(f"Error searching knowledge base: {str(e)}")
             return []
     
+    def is_valid_doc(self, doc):
+        return isinstance(doc, Document)
+
     def get_random_context(self, min_length: int = 200) -> Optional[str]:
         """Get random context from knowledge base for question generation"""
-        if not self.documents:
+        if not self.documents or not isinstance(self.documents, list):
             return None
-        
-        # Filter documents by minimum length
-        suitable_docs = [doc for doc in self.documents if len(doc.page_content) >= min_length]
-        
+        valid_docs = [doc for doc in self.documents if self.is_valid_doc(doc)]
+        suitable_docs = [doc for doc in valid_docs if isinstance(doc, Document) and len(doc.page_content) >= min_length]
         if not suitable_docs:
-            suitable_docs = self.documents  # Fallback to any document
-        
+            suitable_docs = [doc for doc in valid_docs if isinstance(doc, Document)]
         if suitable_docs:
             selected_doc = random.choice(suitable_docs)
             return selected_doc.page_content
-        
         return None
     
     def get_context_by_topic(self, topic: str, k: int = 3) -> List[str]:
         """Get context related to a specific topic"""
-        if not self.vectorstore:
+        if not self.vector_store:
             return []
         
         try:
-            results = self.vectorstore.similarity_search(topic, k=k)
+            results = self.vector_store.similarity_search(topic, k=k)
             return [doc.page_content for doc in results]
         except Exception as e:
             logging.error(f"Error getting context by topic: {str(e)}")
@@ -290,7 +295,10 @@ class KnowledgeManager:
     def get_all_contexts(self) -> List[Dict[str, Any]]:
         """Get all document contexts with metadata"""
         contexts = []
-        for doc in self.documents:
+        valid_docs = [doc for doc in self.documents if self.is_valid_doc(doc)]
+        for doc in valid_docs:
+            if not isinstance(doc, Document):
+                continue
             contexts.append({
                 'content': doc.page_content,
                 'metadata': doc.metadata,
@@ -300,7 +308,7 @@ class KnowledgeManager:
     
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics about the knowledge base"""
-        if not self.documents:
+        if not self.documents or not isinstance(self.documents, list):
             return {
                 'doc_count': 0,
                 'chunk_count': 0,
@@ -309,28 +317,23 @@ class KnowledgeManager:
                 'topic_count': 0,
                 'source_files': []
             }
-        
-        # Calculate statistics
-        total_chars = sum(len(doc.page_content) for doc in self.documents)
-        avg_chunk_size = total_chars / len(self.documents) if self.documents else 0
-        
-        # Get unique source files
+        valid_docs = [doc for doc in self.documents if self.is_valid_doc(doc)]
+        valid_docs = [doc for doc in valid_docs if isinstance(doc, Document)]
+        total_chars = sum(len(doc.page_content) for doc in valid_docs)
+        avg_chunk_size = total_chars / len(valid_docs) if valid_docs else 0
         source_files = set()
-        for doc in self.documents:
+        for doc in valid_docs:
             if 'source_file' in doc.metadata:
                 source_files.add(doc.metadata['source_file'])
             elif 'original_filename' in doc.metadata:
                 source_files.add(doc.metadata['original_filename'])
             elif 'source' in doc.metadata:
                 source_files.add(doc.metadata['source'])
-        
-        # Estimate topic count (this is a simple heuristic)
-        topic_count = min(len(source_files) * 3, len(self.documents) // 2)
-        topic_count = max(topic_count, 1) if self.documents else 0
-        
+        topic_count = min(len(source_files) * 3, len(valid_docs) // 2)
+        topic_count = max(topic_count, 1) if valid_docs else 0
         return {
             'doc_count': len(source_files),
-            'chunk_count': len(self.documents),
+            'chunk_count': len(valid_docs),
             'total_chars': total_chars,
             'avg_chunk_size': int(avg_chunk_size),
             'topic_count': topic_count,
@@ -340,34 +343,24 @@ class KnowledgeManager:
     def clear_knowledge_base(self):
         """Clear the current knowledge base"""
         self.documents = []
-        self.processed_files = {}
-        # Properly dereference the vectorstore before deleting files
-        if self.vectorstore is not None:
-            try:
-                del self.vectorstore
-            except Exception as e:
-                logging.warning(f"Error deleting vectorstore: {e}")
-        self.vectorstore = None
-        import shutil, gc, time, os
-        # Run garbage collection to release file handles
-        gc.collect()
-        time.sleep(0.2)  # Give the OS a moment to release the lock
-        if os.path.exists("./chroma_db"):
-            try:
-                shutil.rmtree("./chroma_db")
-            except Exception as e:
-                logging.error(f"Error deleting chroma_db directory: {e}")
-                raise
+        # Use the vectorstore_service to clear all data from the vector store
+        try:
+            self.vector_store_service.clear_all_data()
+            logging.info("Cleared all data from vector store using clear_all_data().")
+        except Exception as e:
+            logging.error(f"Error clearing all data from vector store: {e}")
+        self.vector_store = None
     
     def export_knowledge_base(self) -> Dict[str, Any]:
         """Export knowledge base for backup/sharing"""
+        valid_docs = [doc for doc in self.documents if self.is_valid_doc(doc) and isinstance(doc, Document)]
         return {
             'documents': [
                 {
                     'content': doc.page_content,
                     'metadata': doc.metadata
                 }
-                for doc in self.documents
+                for doc in valid_docs
             ],
             'stats': self.get_stats()
         }
@@ -375,55 +368,24 @@ class KnowledgeManager:
     def get_sources(self) -> List[str]:
         """Get list of all source documents"""
         sources = set()
-        for doc in self.documents:
+        valid_docs = [doc for doc in self.documents if self.is_valid_doc(doc) and isinstance(doc, Document)]
+        for doc in valid_docs:
             if 'source_file' in doc.metadata:
                 sources.add(doc.metadata['source_file'])
             elif 'original_filename' in doc.metadata:
                 sources.add(doc.metadata['original_filename'])
             elif 'source' in doc.metadata:
                 sources.add(doc.metadata['source'])
-        
         return sorted(list(sources))
-    
-    def get_processed_files_details(self) -> List[Dict[str, Any]]:
-        """Get detailed information about all processed files"""
-        files_info = []
-        for file_hash, metadata in self.processed_files.items():
-            files_info.append({
-                'file_hash': file_hash,
-                'filename': metadata.get('filename', 'Unknown'),
-                'processed_date': metadata.get('processed_date', 'Unknown'),
-                'file_size': metadata.get('file_size', 0),
-                'file_size_mb': round(metadata.get('file_size', 0) / (1024 * 1024), 2),
-                'chunk_count': metadata.get('chunk_count', 0),
-                'file_type': metadata.get('file_type', 'unknown')
-            })
-        
-        # Sort by processed date (most recent first)
-        files_info.sort(key=lambda x: x['processed_date'], reverse=True)
-        return files_info
     
     def remove_processed_file(self, file_hash: str) -> bool:
         """Remove a processed file from the knowledge base"""
         try:
-            if file_hash not in self.processed_files:
-                return False
-            
-            # Remove from processed files metadata
-            filename = self.processed_files[file_hash].get('filename', 'Unknown')
-            del self.processed_files[file_hash]
-            
             # Remove documents from memory (this is a simplified approach)
-            # In a full implementation, you'd need to rebuild the vectorstore
             self.documents = [doc for doc in self.documents 
-                            if doc.metadata.get('file_hash') != file_hash]
-            
-            # Save updated metadata
-            self._save_metadata()
-            
-            logging.info(f"Removed processed file: {filename}")
+                            if self.is_valid_doc(doc) and isinstance(doc, Document) and doc.metadata.get('file_hash') != file_hash]
+            logging.info(f"Removed processed file with hash: {file_hash}")
             return True
-            
         except Exception as e:
             logging.error(f"Error removing processed file: {e}")
             return False
@@ -433,18 +395,16 @@ class KnowledgeManager:
         try:
             if not self.documents or not self.embedder.get():
                 return False
-            
-            # Clear existing vectorstore
-            if os.path.exists(self.persist_directory):
-                import shutil
-                shutil.rmtree(self.persist_directory)
-            
+
+            # Clear existing vectorstore in-place
+            self.vector_store_service.clear_all_data()
+
             # Recreate vectorstore
-            self.vectorstore = self.vectorstore_service.create_from_documents(self.documents, self.embedder.get())
-            
+            self.vector_store = self.vector_store_service.create_from_documents(self.documents, self.embedder.get())
+
             logging.info("Successfully rebuilt vectorstore")
             return True
-            
+
         except Exception as e:
             logging.error(f"Error rebuilding vectorstore: {e}")
             return False
@@ -452,4 +412,7 @@ class KnowledgeManager:
     def is_file_already_processed(self, uploaded_file) -> bool:
         """Check if a file has already been processed"""
         file_hash = self._get_file_hash(uploaded_file)
-        return file_hash in self.processed_files 
+        for doc in self.documents:
+            if getattr(doc, "metadata", {}).get("file_hash") == file_hash:
+                return True
+        return False 

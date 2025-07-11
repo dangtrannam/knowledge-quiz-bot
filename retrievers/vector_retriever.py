@@ -6,18 +6,19 @@ class VectorStoreRetriever:
     """
     Handles retrieval operations from a vector store, including similarity search and topic-based context retrieval.
     """
-    def __init__(self, vectorstore, documents: Optional[List[Any]] = None):
-        self.vectorstore = vectorstore
+    def __init__(self, vector_store, documents: Optional[List[Any]] = None):
+        self.vector_store = vector_store
         self.documents = documents or []
 
     def similarity_search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """
         Search the vector store for relevant information using similarity search with scores.
         """
-        if not self.vectorstore:
+        if not self.vector_store:
             return []
         try:
-            results = self.vectorstore.similarity_search_with_score(query, k=k)
+            logging.info(f"Searching knowledge base with query: {query}")
+            results = self.vector_store.similarity_search_with_score(query, k=k)
             formatted_results = []
             for doc, score in results:
                 formatted_results.append({
@@ -25,6 +26,8 @@ class VectorStoreRetriever:
                     'metadata': doc.metadata,
                     'relevance_score': score
                 })
+                
+            logging.info(f"Formatted results: {formatted_results}")
             return formatted_results
         except Exception as e:
             logging.error(f"Error searching knowledge base: {str(e)}")
@@ -48,10 +51,11 @@ class VectorStoreRetriever:
         """
         Get context related to a specific topic using similarity search.
         """
-        if not self.vectorstore:
+        if not self.vector_store:
             return []
         try:
-            results = self.vectorstore.similarity_search(topic, k=k)
+            logging.info(f"Getting context by topic: {topic}")
+            results = self.vector_store.similarity_search(topic, k=k)
             return [doc.page_content for doc in results]
         except Exception as e:
             logging.error(f"Error getting context by topic: {str(e)}")

@@ -27,20 +27,20 @@ class TestChromaStoreManager:
             mock_chroma.assert_called_once_with(persist_directory='test_chroma_db', embedding_function=embeddings)
 
     def test_add_documents(self):
-        self.manager.vectorstore = Mock()
+        self.manager.vector_store = Mock()
         docs = [Mock()]
         self.manager.add_documents(docs)
-        self.manager.vectorstore.add_documents.assert_called_once_with(docs)
+        self.manager.vector_store.add_documents.assert_called_once_with(docs)
 
     def test_persist(self):
-        self.manager.vectorstore = Mock()
+        self.manager.vector_store = Mock()
         self.manager.persist()
         # Just check that logging does not raise and method exists
 
     def test_clear(self):
         with patch('os.path.exists', return_value=True), \
              patch('shutil.rmtree') as mock_rmtree:
-            self.manager.vectorstore = Mock()
+            self.manager.vector_store = Mock()
             self.manager.clear()
             mock_rmtree.assert_called_once_with('test_chroma_db')
-            assert self.manager.vectorstore is None 
+            assert self.manager.vector_store is None 

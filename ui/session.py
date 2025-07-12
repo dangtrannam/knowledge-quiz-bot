@@ -14,7 +14,7 @@ def initialize_session_state():
         'current_question': None,
         'score': {'correct': 0, 'total': 0},
         'chat_history': [],
-        'selected_documents': ['all'],
+        'selected_documents': [],
         'openai_base_url': "",
         'selected_model': "gpt-4o-mini",
         'model_input_type': "predefined",

@@ -5,6 +5,8 @@ import logging
 from llm.litellm_provider import LiteLLMProvider
 from prompts.quiz_prompt import quiz_prompt
 import string
+from langchain.output_parsers import StructuredOutputParser, ResponseSchema
+from json_repair import repair_json
 
 class QuizAgent:
     """
@@ -81,10 +83,7 @@ class QuizAgent:
             error_message = "No context found. The knowledge base is empty or retriever failed. Please upload documents."
             logging.info(error_message)
             return [self._generate_fallback_question(question_type, difficulty, error_message=error_message)] * num_questions
-        if difficulty == "adaptive":
-            logging.warning("Adaptive difficulty is not implemented. Returning fallback questions.")
-            error_message = "Adaptive difficulty is not implemented. Please select easy, medium, or hard."
-            return [self._generate_fallback_question(question_type, difficulty, error_message=error_message)] * num_questions
+
         prompt = quiz_prompt.format(
             context=context,
             difficulty=difficulty,
@@ -95,21 +94,25 @@ class QuizAgent:
         try:
             logging.info("Calling LLM for batch question generation.")
             answer = self.llm_provider.completion(prompt=prompt, temperature=0.7, max_tokens=3000)
-            import json, re
+            import re
             questions = []
-            # Try to extract a JSON list from the response
-            if "```json" in answer and "```" in answer:
-                json_match = re.search(r'```json\s*\n?(.*?)\n?```', answer, re.DOTALL)
-                if json_match:
-                    try:
-                        questions = json.loads(json_match.group(1).strip())
-                    except Exception as e:
-                        logging.error(f"Failed to parse JSON from markdown block: {e}")
+            # Extract JSON between <result>...</result> tags if present
+            tag_match = re.search(r'<result>(.*?)</result>', answer, re.DOTALL)
+            if tag_match:
+                json_str = tag_match.group(1).strip()
             else:
+                # Fallback: Try to extract a JSON list or object from the output
+                json_match = re.search(r'(\[.*?\]|\{.*?\})', answer, re.DOTALL)
+                json_str = json_match.group(1) if json_match else None
+            if json_str:
+                # Repair the JSON string before parsing
                 try:
-                    questions = json.loads(answer.strip())
+                    repaired_json = repair_json(json_str)
+                    questions = json.loads(repaired_json)
                 except Exception as e:
-                    logging.error(f"Failed to parse raw JSON: {e}")
+                    logging.error(f"Failed to repair or parse JSON: {e}\nExtracted: {json_str}")
+            else:
+                logging.error(f"No JSON array or object found in LLM output. Raw output: {answer}")
             # Salvage: If questions is not a list, try to extract valid question dicts
             if not isinstance(questions, list):
                 questions = []
@@ -131,9 +134,12 @@ class QuizAgent:
             error_message = f"Error during batch question generation: {e}"
             return [self._generate_fallback_question(question_type, difficulty, error_message=error_message)] * num_questions
 
-    def _normalize_answer(self, answer: str) -> str:
-        # Remove leading option letter (e.g., 'A)', 'B)') and punctuation, lower, strip
-        answer = answer.strip().lower()
+    def _normalize_answer(self, answer: Any) -> str:
+        if isinstance(answer, bool):
+            return str(answer).lower()  # 'true' or 'false'
+        if answer is None:
+            return ""
+        answer = str(answer).strip().lower()
         answer = re.sub(r'^[a-d]\)\s*', '', answer)  # Remove 'A) ', 'B) ', etc.
         answer = answer.translate(str.maketrans('', '', string.punctuation))
         answer = answer.strip()

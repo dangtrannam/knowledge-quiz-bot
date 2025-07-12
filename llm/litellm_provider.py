@@ -16,6 +16,7 @@ class LiteLLMProvider(LLMBase):
         logging.info(f"LiteLLMProvider initialized with api_base: {self.api_base}")
 
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        logging.info(f"LiteLLMProvider chat with model: {self.model}")
         response = litellm.completion(
             model=self.model,
             messages=messages,
@@ -32,9 +33,12 @@ class LiteLLMProvider(LLMBase):
             data = response.json()  # type: ignore[attr-defined]
         else:
             raise TypeError(f"Unexpected response type: {type(response)}")
+        
+        logging.info(f"LiteLLMProvider chat response: {data}")
         return data['choices'][0]['message']['content']  # type: ignore
 
     def completion(self, prompt: str, **kwargs) -> str:
+        logging.info(f"LiteLLMProvider completion with model: {self.model}")
         response = litellm.completion(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
@@ -51,6 +55,8 @@ class LiteLLMProvider(LLMBase):
             data = response.json()  # type: ignore[attr-defined]
         else:
             raise TypeError(f"Unexpected response type: {type(response)}")
+        
+        logging.info(f"LiteLLMProvider completion response: {data}")
         return data['choices'][0]['message']['content']  # type: ignore
 
     def embed(self, texts: List[str], **kwargs) -> List[List[float]]:

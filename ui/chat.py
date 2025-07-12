@@ -1,30 +1,31 @@
 import streamlit as st
+from ui.utils import get_available_documents, get_knowledge_manager
 
 def show_chat_interface(session_state):
+    # --- Document Selection Control ---
+    km = get_knowledge_manager()
+    available_docs = get_available_documents(km)
+    doc_options = {doc['id']: doc['name'] for doc in available_docs}
+    selected_docs = st.multiselect(
+        "Select documents to chat with:",
+        options=list(doc_options.keys()),
+        default=session_state.get('selected_documents', ['all']),
+        format_func=lambda x: doc_options.get(x, x)
+    )
+    if not selected_docs:
+        selected_docs = ['all']
+    session_state.selected_documents = selected_docs
+    if 'all' in selected_docs:
+        st.info("💬 Chatting with **All Documents**")
+    else:
+        selected_names = [doc_options[doc_id] for doc_id in selected_docs if doc_id in doc_options]
+        st.info(f"💬 Chatting with: **{', '.join(selected_names)}**")
+    # --- End Document Selection Control ---
+    
     st.markdown("## 💬 Chat with Your Documents")
     if not session_state.chat_bot:
         st.error("Chat bot not initialized. Please upload documents first.")
         return
-    if session_state.selected_documents:
-        if 'all' in session_state.selected_documents:
-            st.info("💬 Chatting with **All Documents**")
-        else:
-            doc_names = []
-            # Group documents by file_hash and extract filenames from chunk metadata
-            from collections import defaultdict
-            file_groups = defaultdict(list)
-            for doc in getattr(session_state.knowledge_manager, 'documents', []):
-                meta = getattr(doc, 'metadata', {})
-                file_id = meta.get('file_hash') or meta.get('source_file') or meta.get('original_filename') or 'Unknown'
-                file_groups[file_id].append(doc)
-            for doc_id in session_state.selected_documents:
-                docs = file_groups.get(doc_id, [])
-                if docs:
-                    meta = docs[0].metadata
-                    filename = meta.get('source_file') or meta.get('original_filename') or 'Unknown'
-                    doc_names.append(filename)
-            if doc_names:
-                st.info(f"💬 Chatting with: **{', '.join(doc_names)}**")
     chat_container = st.container()
     with chat_container:
         if session_state.chat_history:

@@ -185,6 +185,8 @@ def show_navbar(
             )
             st.session_state.selected_model = selected_model
             st.session_state.custom_model = ""
+            
+            initialize_agents(st.session_state, km)
         else:
             custom_model = st.text_input(
                 "Custom Model Name",
@@ -202,6 +204,8 @@ def show_navbar(
                     st.warning("⚠️ Model names usually don't contain spaces. Please check your model name.")
                 elif len(selected_model) < 3:
                     st.warning("⚠️ Model name seems too short. Please verify it's correct.")
+                
+                initialize_agents(st.session_state, km)
             else:
                 selected_model = predefined_models[0]
                 st.session_state.selected_model = selected_model

@@ -10,8 +10,8 @@ def setup_page_config():
         layout="wide",
         initial_sidebar_state="expanded",
         menu_items={
-            'Get Help': 'https://github.com/your-repo/knowledge-quiz-bot',
-            'Report a bug': 'https://github.com/your-repo/knowledge-quiz-bot/issues',
+            'Get Help': 'https://github.com/dangtrannam/knowledge-quiz-bot',
+            'Report a bug': 'https://github.com/dangtrannam/knowledge-quiz-bot/issues',
             'About': "# Knowledge Quiz Bot\nYour AI-powered learning companion inspired by NotebookLM!"
         }
     )

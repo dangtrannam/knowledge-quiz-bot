@@ -13,17 +13,62 @@ class KnowledgeManager:
     """
     Orchestrates document ingestion, embedding, vector storage, and retrieval using modular components.
     """
-    def __init__(self, persist_directory: str = "./chroma_db", metadata_file: str = "./processed_files.json"):
+    def __init__(self, persist_directory: str = "./chroma_db", metadata_file: str = "./processed_files.json", embedding_provider: str = '', embedding_model: str = '', embedding_base_url: str = '', embedding_api_key: str = ''):
         self.persist_directory = persist_directory
         self.metadata_file = metadata_file
         self.document_processor = DocumentProcessor()
         self.vector_store_service = VectorStoreService(persist_directory)
-        self.embedder = EmbeddingModel()
+        # Use provided embedding config or fallback to defaults
+        from constants import EMBEDDING_PROVIDER_DEFAULTS, DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_BASE_URL
+        provider = str(embedding_provider) if embedding_provider else 'Ollama'
+        model = str(embedding_model) if embedding_model else EMBEDDING_PROVIDER_DEFAULTS[provider]["models"][0]
+        base_url = str(embedding_base_url) if embedding_base_url is not None else EMBEDDING_PROVIDER_DEFAULTS[provider]["base_url"]
+        api_key = str(embedding_api_key) if embedding_api_key is not None else ""
+        logging.info(f"[EmbeddingConfig] INIT provider={provider}, model={model}, base_url={base_url}, api_key_set={bool(api_key)}")
+        # Compose model name with provider prefix if needed
+        if provider.lower() == 'ollama' and not model.startswith('ollama/'):
+            model_name = f"ollama/{model}"
+        elif provider.lower() == 'openai' and not model.startswith('openai/'):
+            model_name = f"openai/{model}"
+        else:
+            model_name = model
+        self.embedder = EmbeddingModel(model_name=model_name, api_base=base_url, api_key=api_key)
+        self._last_embedding_config = {
+            'provider': provider,
+            'model': model,
+            'base_url': base_url,
+            'api_key': api_key
+        }
         self.documents = []
         self.is_preloaded = False
         self.vector_store = None
         self.retriever = None
         self._preload_existing_documents()
+
+    def update_embedder(self, embedding_provider: str = '', embedding_model: str = '', embedding_base_url: str = '', embedding_api_key: str = ''):
+        from constants import EMBEDDING_PROVIDER_DEFAULTS
+        provider = str(embedding_provider) if embedding_provider else 'Ollama'
+        model = str(embedding_model) if embedding_model else EMBEDDING_PROVIDER_DEFAULTS[provider]["models"][0]
+        base_url = str(embedding_base_url) if embedding_base_url is not None else EMBEDDING_PROVIDER_DEFAULTS[provider]["base_url"]
+        api_key = str(embedding_api_key) if embedding_api_key is not None else ""
+        new_config = {
+            'provider': provider,
+            'model': model,
+            'base_url': base_url,
+            'api_key': api_key
+        }
+        if hasattr(self, '_last_embedding_config') and self._last_embedding_config == new_config:
+            logging.info(f"[EmbeddingConfig] UPDATE skipped (no change)")
+            return
+        logging.info(f"[EmbeddingConfig] UPDATE provider={provider}, model={model}, base_url={base_url}, api_key_set={bool(api_key)}")
+        if provider.lower() == 'ollama' and not model.startswith('ollama/'):
+            model_name = f"ollama/{model}"
+        elif provider.lower() == 'openai' and not model.startswith('openai/'):
+            model_name = f"openai/{model}"
+        else:
+            model_name = model
+        self.embedder = EmbeddingModel(model_name=model_name, api_base=base_url, api_key=api_key)
+        self._last_embedding_config = new_config
     
     def _preload_existing_documents(self):
         """Preload existing vector database if available"""

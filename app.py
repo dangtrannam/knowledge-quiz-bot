@@ -85,13 +85,45 @@ def main():
     load_css()
     initialize_session_state()
     # --- KnowledgeManager initialization with debug ---
+    embedding_provider = st.session_state.get('embedding_provider_choice', 'Ollama')
+    embedding_model = st.session_state.get('embedding_model', 'nomic-embed-text')
+    embedding_base_url = st.session_state.get('embedding_base_url', 'http://localhost:11434')
+    embedding_api_key = st.session_state.get('embedding_api_key', '')
     if "knowledge_manager" not in st.session_state or st.session_state.knowledge_manager is None:
         import traceback
         try:
-            st.session_state.knowledge_manager = KnowledgeManager()
+            st.session_state.knowledge_manager = KnowledgeManager(
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+                embedding_base_url=embedding_base_url,
+                embedding_api_key=embedding_api_key
+            )
+            st.session_state._last_embedding_config = {
+                'provider': embedding_provider,
+                'model': embedding_model,
+                'base_url': embedding_base_url,
+                'api_key': embedding_api_key
+            }
         except Exception as e:
             traceback.print_exc()
             st.session_state.knowledge_manager = None
+    else:
+        # Check if embedding config changed, if so, update embedder
+        last_emb = st.session_state.get('_last_embedding_config', {})
+        current_emb = {
+            'provider': embedding_provider,
+            'model': embedding_model,
+            'base_url': embedding_base_url,
+            'api_key': embedding_api_key
+        }
+        if last_emb != current_emb:
+            st.session_state.knowledge_manager.update_embedder(
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+                embedding_base_url=embedding_base_url,
+                embedding_api_key=embedding_api_key
+            )
+            st.session_state._last_embedding_config = current_emb
 
     # Navbar-based UI
     km = st.session_state.knowledge_manager

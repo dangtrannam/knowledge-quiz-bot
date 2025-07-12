@@ -185,7 +185,6 @@ def show_navbar(
             )
             st.session_state.selected_model = selected_model
             st.session_state.custom_model = ""
-            
             initialize_agents(st.session_state, km)
         else:
             custom_model = st.text_input(
@@ -204,7 +203,6 @@ def show_navbar(
                     st.warning("⚠️ Model names usually don't contain spaces. Please check your model name.")
                 elif len(selected_model) < 3:
                     st.warning("⚠️ Model name seems too short. Please verify it's correct.")
-                
                 initialize_agents(st.session_state, km)
             else:
                 selected_model = predefined_models[0]
@@ -229,6 +227,95 @@ def show_navbar(
             st.session_state.custom_model = ""
             st.session_state.openai_base_url = defaults["base_url"]
             st.success("🔄 AI configuration reset to defaults! Changes will take effect on next use.")
+            st.rerun()
+
+        # --- Embedding Model Section ---
+        from constants import EMBEDDING_PROVIDER_OPTIONS, EMBEDDING_PROVIDER_DEFAULTS, DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_BASE_URL
+        st.markdown("---")
+        st.subheader("Embedding Model Settings")
+        # Embedding API Key input for all providers
+        embedding_api_key = st.text_input(
+            "Embedding API Key",
+            type="password",
+            value=st.session_state.get("embedding_api_key", ""),
+            help=f"Enter your API key for embeddings (if required)",
+            key="embedding_api_key"
+        )
+        # Do NOT set st.session_state["embedding_api_key"] here! Let the widget manage it.
+        emb_provider = st.selectbox(
+            "Embedding Provider",
+            EMBEDDING_PROVIDER_OPTIONS,
+            index=EMBEDDING_PROVIDER_OPTIONS.index(st.session_state.get("embedding_provider_choice", EMBEDDING_PROVIDER_OPTIONS[0])),
+            key="embedding_provider_choice",
+            help="Choose your embedding provider. This will update model and base URL defaults."
+        )
+        emb_defaults = EMBEDDING_PROVIDER_DEFAULTS.get(emb_provider if emb_provider is not None else EMBEDDING_PROVIDER_OPTIONS[0], EMBEDDING_PROVIDER_DEFAULTS[EMBEDDING_PROVIDER_OPTIONS[0]])
+        emb_predefined_models = emb_defaults["models"]
+        emb_base_url = st.text_input(
+            "Embedding Base URL (Optional)",
+            value=st.session_state.get("embedding_base_url", emb_defaults["base_url"]),
+            placeholder=emb_defaults["base_url"],
+            help=f"Custom base URL for {emb_provider} (leave empty for default)",
+            key="embedding_api_base"
+        )
+        emb_model_input_type = st.radio(
+            "Embedding Model Selection",
+            options=["predefined", "custom"],
+            format_func=lambda x: "📋 Select from List" if x == "predefined" else "✏️ Custom Model",
+            horizontal=True,
+            help="Choose to select from predefined embedding models or enter a custom model name",
+            key="embedding_model_input_type"
+        )
+        # Do NOT set st.session_state.embedding_model_input_type here (Streamlit manages it)
+        if emb_model_input_type == "predefined":
+            emb_current_model_index = 0
+            if st.session_state.get("embedding_model", emb_predefined_models[0]) in emb_predefined_models:
+                emb_current_model_index = emb_predefined_models.index(st.session_state.get("embedding_model", emb_predefined_models[0]))
+            emb_selected_model = st.selectbox(
+                "Embedding Model",
+                options=emb_predefined_models,
+                index=emb_current_model_index,
+                help=f"Choose the {emb_provider} embedding model to use",
+                key="embedding_model"
+            )
+            # Do NOT set st.session_state.embedding_model here (Streamlit manages it)
+            st.session_state.embedding_custom_model = ""
+        else:
+            emb_custom_model = st.text_input(
+                "Custom Embedding Model Name",
+                value=st.session_state.get("embedding_custom_model", ""),
+                placeholder="e.g., nomic-embed-text, all-minilm, sentence-transformers/all-MiniLM-L6-v2",
+                help="Enter the exact embedding model name as expected by your API",
+                key="embedding_custom_model"
+            )
+            st.info(f"\n💡 **Custom Model Examples for {emb_provider}:**\n" + "\n".join(f"• {m}" for m in emb_defaults["models"]))
+            if emb_custom_model and emb_custom_model.strip():
+                emb_selected_model = emb_custom_model.strip()
+                # Do NOT set st.session_state.embedding_model here (Streamlit manages it)
+                st.session_state.embedding_custom_model = emb_custom_model.strip()
+                if ' ' in emb_selected_model:
+                    st.warning("⚠️ Model names usually don't contain spaces. Please check your model name.")
+                elif len(emb_selected_model) < 3:
+                    st.warning("⚠️ Model name seems too short. Please verify it's correct.")
+            else:
+                emb_selected_model = emb_predefined_models[0]
+                # Do NOT set st.session_state.embedding_model here (Streamlit manages it)
+                if not emb_custom_model:
+                    st.session_state.embedding_custom_model = ""
+        st.session_state.embedding_base_url = emb_base_url
+        # Do NOT set st.session_state.embedding_model_input_type here (Streamlit manages it)
+        st.caption(f"**Current Embedding Provider:** {emb_provider}")
+        st.caption(f"**Current Embedding Model:** {st.session_state.embedding_model}")
+        st.caption(f"**Embedding Base URL:** {emb_base_url if emb_base_url else emb_defaults['base_url']}")
+        
+
+        if st.button("🔄 Reset Embedding Configuration", help="Reset embedding provider/model/base URL to defaults"):
+            st.session_state.embedding_provider_choice = EMBEDDING_PROVIDER_OPTIONS[0]
+            st.session_state.embedding_model = EMBEDDING_PROVIDER_DEFAULTS[EMBEDDING_PROVIDER_OPTIONS[0]]["models"][0]
+            st.session_state.embedding_custom_model = ""
+            st.session_state.embedding_base_url = EMBEDDING_PROVIDER_DEFAULTS[EMBEDDING_PROVIDER_OPTIONS[0]]["base_url"]
+            st.session_state.embedding_model_input_type = "predefined"
+            st.success("🔄 Embedding configuration reset to defaults! Changes will take effect on next use.")
             st.rerun()
 
     # Chat Tab

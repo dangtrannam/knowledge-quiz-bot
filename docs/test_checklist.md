@@ -11,11 +11,19 @@
 ---
 
 ## Embeddings (`embeddings/embedding_model.py`)
-- [x] Loads HuggingFace model on correct device (CPU/GPU)
+- [x] Loads HuggingFace or LiteLLM model on correct device (CPU/GPU)
 - [x] Generates embeddings for sample text
 - [x] Handles invalid model name gracefully
 - [x] Handles unavailable device (fallback to CPU)
 - [x] Logs errors and fallback events
+- [x] `LiteLLMEmbeddings` wrapper tested
+
+## LLM Abstraction (`llm/`)
+- [x] `LLMBase` interface is covered by tests
+- [x] `LiteLLMProvider` tested for chat, completion, and embedding
+- [x] Handles missing/invalid API key
+- [x] Handles provider/model selection logic
+- [x] Error handling for unsupported features (TTS, STT)
 
 ## Document Loader (`loaders/document_loader.py`)
 - [x] Loads PDF files correctly
@@ -25,12 +33,13 @@
 - [x] Handles unsupported file types gracefully
 - [x] Logs errors for failed loads
 
-## Vector Store (`vectorstores/chroma_store.py`)
+## Vector Store (`vector_stores/chroma_store.py`)
 - [x] Creates new vector store from documents and embeddings
 - [x] Loads existing vector store
 - [x] Adds documents to existing vector store
 - [x] Persists vector store to disk
 - [x] Handles missing/corrupted vector store gracefully
+- [x] Clear and rebuild logic tested
 
 ## Retriever (`retrievers/vector_retriever.py`)
 - [x] Performs similarity search and returns relevant results
@@ -46,6 +55,7 @@
 - [x] Processes text content for demo/sample
 - [x] Rebuilds vector store from current documents
 - [x] Handles missing/invalid embeddings
+- [x] Exports and clears knowledge base
 
 ## QuizAgent (`agents/quiz_agent.py`)
 - [x] Generates quiz questions with valid API key
@@ -54,6 +64,7 @@
 - [x] Adaptive difficulty logic works as expected
 - [x] Handles LLM failures gracefully
 - [x] Logs errors and fallback events
+- [x] Answer validation logic tested
 
 ## ChatAgent (`agents/chat_agent.py`)
 - [x] Generates chat responses with valid API key
@@ -61,10 +72,22 @@
 - [x] Handles missing context (no documents)
 - [x] Handles LLM failures gracefully
 - [x] Logs errors and fallback events
+- [x] Conversation starter logic tested
 
-## UI Utilities (`ui/utils.py`)
-- [x] Loads page config without error
-- [x] Loads custom CSS without error
+## Services (`services/`)
+- [x] `agent_manager.py` initializes and manages LLM providers and agents
+- [x] `document_processor.py` processes file uploads and text content
+- [x] `vector_store_service.py` manages vector store creation, loading, and persistence
+- [x] Error handling and logging for all service orchestration
+
+## UI Components (`ui/`)
+- [x] `utils.py`: Loads page config, custom CSS, and helper functions
+- [x] `knowledge_base.py`: Displays knowledge base info, stats, and management actions
+- [x] `chat.py`: Chat interface, document selection, chat history, and user input handling
+- [x] `quiz.py`: Quiz interface, configuration, question display, answer submission, and results
+- [x] `screens.py`: Welcome screen, upload prompt, and main navigation tabs
+- [x] `session.py`: Session state initialization and management
+- [x] UI flows for chat, quiz, and knowledge base management tested
 
 ## App Integration (`app.py`)
 - [x] End-to-end file upload → document processing → knowledge base creation
@@ -83,6 +106,17 @@
 - [x] Session state persistence and mode switching (test_session_state_persistence)
 - [x] Complete user workflow simulation in Streamlit AppTest (test_full_user_workflow)
 - [x] AppTest functionality and file upload simulation patterns (test_apptest_attributes)
+
+## Unit Tests (`tests/unit_tests/`)
+- [x] `test_chat_agent.py`: ChatAgent logic and error handling
+- [x] `test_quiz_agent.py`: QuizAgent logic and answer validation
+- [x] `test_document_loader.py`: DocumentLoader logic
+- [x] `test_embedding_model.py`: EmbeddingModel and LiteLLMEmbeddings logic
+- [x] `test_knowledge_manager.py`: KnowledgeManager orchestration
+- [x] `test_vector_retriever.py`: VectorStoreRetriever logic
+- [x] `test_vectorstore_service.py`: VectorStoreService logic
+- [x] `test_ui_utils.py`: UI utility functions
+- [x] Additional unit tests for new modules as added
 
 ## White Box/Edge Cases
 - [x] Invalid/corrupt files

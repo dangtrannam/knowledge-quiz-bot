@@ -46,220 +46,107 @@ A sophisticated AI platform that transforms your documents into interactive lear
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/your-username/knowledge-quiz-bot.git
+   git clone https://github.com/dangtrannam/knowledge-quiz-bot.git
    cd knowledge-quiz-bot
    ```
-
 2. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
-
 3. **Run the application**
    ```bash
-   streamlit run app.py
+   python run start.py
    ```
-
 4. **Open your browser**
    Navigate to `http://localhost:8501`
 
 ## 📖 How to Use
 
-### 1. **Configure API Settings**
-- Enter your OpenAI API key in the sidebar
-- **Advanced Settings**: Optionally configure custom base URL and select AI model
-- **Model Selection**: Choose from predefined models or enter custom model names
-  - **Predefined**: GPT-3.5 Turbo, GPT-4, GPT-4 Turbo, GPT-4o, GPT-4o Mini, and more
-  - **Custom**: Enter any model name (e.g., `gpt-4-1106-preview`, `claude-3-opus`, custom models)
-- Support for OpenAI-compatible APIs by setting custom base URL
-
-### 2. **Upload Documents**
-- Click "Choose files" to upload your learning materials
-- Supported formats: PDF, TXT, DOCX
-- Multiple files can be uploaded simultaneously
-
-### 3. **Build Knowledge Base**
-- Click "📖 Build Knowledge Base" to process your documents
-- AI will analyze and index your content for both chat and quiz features
-
-### 4. **Choose Your Mode**
-- **💬 Chat Mode**: Have interactive conversations with your documents
-- **🎯 Quiz Mode**: Test your knowledge with AI-generated questions
-
-#### For Chat Mode:
-### 5a. **Select Documents**
-- Choose specific documents or select "All Documents" to chat with everything
-- See detailed information about your selected content
-
-### 6a. **Start Chatting**
-- Click "💬 Start Chat" to begin your conversation
-- Ask questions about your documents and get contextual responses
-- Use conversation starters for inspiration
-
-#### For Quiz Mode:
-### 5b. **Configure Quiz Settings**
-- **Quiz Type**: Choose from Multiple Choice, True/False, Short Answer, or Mixed
-- **Difficulty**: Select Easy, Medium, Hard, or Adaptive
-- **Number of Questions**: Set anywhere from 5 to 50 questions
-
-### 6b. **Take the Quiz**
-- Click "🚀 Start Quiz" to begin
-- Answer questions and receive immediate feedback
-- View explanations and source citations for each answer
-
-### 7. **Review Results**
-- See your final score and grade (Quiz Mode)
-- Get personalized feedback on your performance
-- Option to retake quiz or switch to chat mode
-
-## 🎮 Try the Demo
-
-Don't have documents ready? Try our built-in demo:
-
-1. Click "🎮 Try with Sample Content" in the upload section
-2. Select "Load Demo: AI & Machine Learning"
-3. Start taking quizzes immediately!
+1. **Configure API Settings**: Enter your OpenAI API key in the sidebar. Optionally configure custom base URL and select AI model.
+2. **Upload Documents**: Click "Choose files" to upload your learning materials (PDF, TXT, DOCX supported).
+3. **Build Knowledge Base**: Click "📖 Build Knowledge Base" to process your documents.
+4. **Choose Your Mode**: Select Chat or Quiz mode from the navigation tabs.
+5. **Chat Mode**: Select documents, ask questions, and get contextual answers with source citations.
+6. **Quiz Mode**: Configure quiz settings, start the quiz, answer questions, and review results.
 
 ## 🏗️ Architecture
 
-The project follows a modular architecture inspired by modern AI applications:
+The project follows a modular architecture inspired by modern RAG and LangChain best practices:
 
 ```
-knowledge-quiz-bot/
-├── app.py                 # Main Streamlit application
-├── quiz_bot.py           # Core quiz generation logic
-├── chat_bot.py           # Interactive chat functionality
-├── knowledge_manager.py   # Document processing and vector storage
-├── utils.py              # Helper functions and UI components
-├── requirements.txt      # Python dependencies
-└── README.md            # This file
+knowledge-quiz-chatbot/
+├── app.py                  # Main Streamlit application
+├── knowledge_manager.py    # Orchestrates document ingestion, embedding, vector storage, and retrieval
+├── loaders/                # Document loading and splitting
+│   └── document_loader.py
+├── embeddings/             # Embedding model abstraction
+│   └── embedding_model.py
+├── vector_stores/          # Vector store management (ChromaDB)
+│   └── chroma_store.py
+├── retrievers/             # Retrieval logic
+│   └── vector_retriever.py
+├── agents/                 # Quiz and chat agent logic
+│   ├── quiz_agent.py
+│   └── chat_agent.py
+├── llm/                    # LLM, embedding, TTS, STT providers and abstraction
+│   ├── base.py
+│   ├── litellm_provider.py
+│   └── ...
+├── services/               # Service orchestration (agent manager, document processor, vector store service)
+│   ├── agent_manager.py
+│   ├── document_processor.py
+│   └── vector_store_service.py
+├── ui/                     # UI components and flows
+│   ├── utils.py
+│   ├── knowledge_base.py
+│   ├── chat.py
+│   ├── quiz.py
+│   ├── screens.py
+│   └── session.py
+├── prompts/                # Prompt templates for LLMs
+│   ├── chat_prompt.py
+│   └── quiz_prompt.py
+├── tests/                  # Unit and integration tests
+│   ├── unit_tests/
+│   └── integration/
+├── constants.py            # Provider/model configuration
+├── requirements.txt        # Python dependencies
+├── README.md               # This file
+└── docs/                   # Project documentation
 ```
 
-### Core Components
-
-- **KnowledgeManager**: Handles document ingestion, processing, and vector database management
-- **QuizBot**: Generates questions using LangChain and OpenAI, manages difficulty adaptation
-- **ChatBot**: Provides interactive chat interface with document selection and contextual responses
-- **Streamlit UI**: Provides an intuitive interface similar to NotebookLM's design
+### Key Documentation
+- [API Reference](docs/api_reference.md)
+- [Developer Guide](docs/developer_guide.md)
+- [Testing Checklist](docs/test_checklist.md)
+- [Refactor Plan](docs/refactor_plan.md)
 
 ## 🛠️ Technical Details
 
-### AI Models Used
-- **OpenAI GPT-4o-mini**: For question generation and short answer evaluation
-- **all-MiniLM-L6-v2**: For semantic document search and retrieval
-- **ChromaDB**: Vector database for efficient similarity search
+- **LLM Abstraction**: Easily switch between OpenAI, Gemini, Anthropic, Ollama, and more via `llm/`.
+- **Prompt Engineering**: All prompt templates are centralized in `prompts/`.
+- **Service Layer**: Agent and vector store orchestration in `services/`.
+- **UI**: Modular Streamlit UI in `ui/`.
+- **Testing**: Comprehensive unit and integration tests in `tests/`.
 
-### Question Generation Process
-1. **Context Retrieval**: Randomly select relevant document chunks
-2. **Prompt Engineering**: Use specialized prompts for each question type
-3. **JSON Parsing**: Structure questions with metadata and explanations
-4. **Fallback Handling**: Graceful error recovery with backup questions
+## 🗺️ Roadmap
 
-### Adaptive Difficulty
-- Tracks recent performance (last 3 questions)
-- Automatically adjusts difficulty based on success rate
-- Provides personalized learning experience
-
-## 🎯 Use Cases
-
-### **Students**
-- Study for exams using course materials
-- Test comprehension of textbooks and papers
-- Create practice quizzes from lecture notes
-
-### **Professionals**
-- Review training materials and documentation
-- Test knowledge of company policies and procedures
-- Prepare for certifications and assessments
-
-### **Educators**
-- Generate quiz questions from curriculum content
-- Create assessments based on reading materials
-- Provide students with self-study tools
-
-### **Researchers**
-- Test understanding of research papers
-- Review literature and extract key concepts
-- Validate comprehension of complex topics
-
-## 🔧 Configuration Options
-
-### Environment Variables
-```bash
-OPENAI_API_KEY=your_api_key_here
-```
-
-### Customizable Settings
-- **AI Model Selection**: 
-  - Predefined models: GPT-3.5 Turbo, GPT-4, GPT-4 Turbo, GPT-4o, GPT-4o Mini
-  - Custom models: Enter any model name for latest OpenAI models or third-party APIs
-- **Custom Base URL**: Support for OpenAI-compatible APIs (Azure OpenAI, Anthropic, Local models, etc.)
-- **Model Validation**: Built-in warnings for common model name issues
-- **Chunk Size**: Adjust document splitting (default: 1000 characters)
-- **Chunk Overlap**: Control context preservation (default: 200 characters)
-- **Vector DB**: Persistent storage location (default: ./chroma_db)
-- **Question History**: Number of questions to track (default: 20)
-
-## 🤝 Contributing
-
-We welcome contributions! Here's how you can help:
-
-1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
-3. **Commit your changes**: `git commit -m 'Add amazing feature'`
-4. **Push to the branch**: `git push origin feature/amazing-feature`
-5. **Open a Pull Request**
-
-### Development Setup
-```bash
-# Clone your fork
-git clone https://github.com/your-username/knowledge-quiz-bot.git
-
-# Install development dependencies
-pip install -r requirements.txt
-
-# Run tests (when available)
-pytest
-
-# Start development server
-streamlit run app.py
-```
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+- [ ] Multi-language support
+- [ ] Advanced analytics
+- [ ] Collaborative features
+- [ ] Custom prompts
+- [ ] Export functionality
+- [ ] Integration APIs
+- [ ] Voice interactions
+- [ ] Mobile app
 
 ## 🙏 Acknowledgments
-
 - **Google NotebookLM**: Inspiration for the user experience and document processing approach
 - **LangChain**: Powerful framework for building LLM applications
 - **Streamlit**: Excellent platform for creating ML web applications
 - **OpenAI**: Advanced language models that power the question generation
 
 ## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/your-username/knowledge-quiz-bot/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-username/knowledge-quiz-bot/discussions)
-- **Email**: your-email@example.com
-
-## 🗺️ Roadmap
-
-### Upcoming Features
-- [ ] **Multi-language support**: Questions and interface in multiple languages
-- [ ] **Advanced analytics**: Detailed learning progress insights
-- [ ] **Collaborative features**: Share quiz sessions with others
-- [ ] **Custom prompts**: User-defined question generation templates
-- [ ] **Export functionality**: Save quizzes as PDF or other formats
-- [ ] **Integration APIs**: Connect with learning management systems
-
-### Long-term Vision
-- [ ] **Voice interactions**: Audio questions and responses
-- [ ] **Mobile app**: Native iOS and Android applications
-- [ ] **Advanced AI models**: Support for different LLM providers
-- [ ] **Gamification**: Badges, streaks, and achievement systems
-
----
-
-Made with ❤️ by developers who love learning and AI
-
-**Star ⭐ this repo if you find it useful!** 
+- **Issues**: [GitHub Issues](https://github.com/dangtrannam/knowledge-quiz-bot/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/dangtrannam/knowledge-quiz-bot/discussions)
+- **Email**: dangtrannam2001@gmail.com 

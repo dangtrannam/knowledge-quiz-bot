@@ -39,13 +39,20 @@ def show_quiz_interface(session_state, handle_answer_submission):
     )
     session_state.difficulty = difficulty
 
-    num_questions = st.slider(
-        "Number of Questions",
-        min_value=1,
-        max_value=50,
-        value=session_state.get("num_questions", 5),
+    # Change from slider to text input for number of questions
+    num_questions_input = st.text_input(
+        "Number of Questions (1-50)",
+        value=str(session_state.get("num_questions", 5)),
         help="Set the number of questions for your quiz."
     )
+    try:
+        num_questions = int(num_questions_input)
+        if num_questions < 1 or num_questions > 50:
+            st.warning("Please enter a number between 1 and 50.")
+            num_questions = 5
+    except Exception:
+        st.warning("Please enter a valid integer for the number of questions.")
+        num_questions = 5
     session_state.num_questions = num_questions
     # --- End Quiz Configuration Controls ---
 
@@ -143,8 +150,15 @@ def handle_answer_submission(session_state, user_answer, question_data):
     session_state.current_question_index = session_state.get('current_question_index', 0) + 1
     if is_correct:
         st.balloons()
-    if st.button("Next Question →"):
-        st.rerun()
+    # If last question, show results, else show next button
+    num_questions = session_state.get('num_questions', 5)
+    idx = session_state.get('current_question_index', 0)
+    questions = session_state.get('quiz_questions', [])
+    if idx >= num_questions or idx >= len(questions):
+        show_quiz_results(session_state)
+    else:
+        if st.button("Next Question →"):
+            st.rerun()
 
 def show_quiz_results(session_state):
     st.markdown("## 🎉 Quiz Complete!")
@@ -180,14 +194,3 @@ def show_quiz_results(session_state):
         st.warning("📚 Good effort! Consider reviewing the material again.")
     else:
         st.error("💪 Keep studying! Practice makes perfect.")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔄 Take Another Quiz", type="primary"):
-            session_state.quiz_active = True
-            session_state.score = {'correct': 0, 'total': 0}
-            session_state.current_question = None
-            st.rerun()
-    with col2:
-        if st.button("📊 View Knowledge Base"):
-            session_state.quiz_active = False
-            st.rerun() 

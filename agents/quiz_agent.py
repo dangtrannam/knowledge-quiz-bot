@@ -74,50 +74,6 @@ class QuizAgent:
             return self._generate_fallback_question(question_type, question.get('difficulty', 'medium'))
         return question
 
-    def generate_question(self, question_type: str = "multiple_choice", difficulty: str = "medium", selected_documents: list = []) -> Dict[str, Any]:
-        import logging
-        logging.info(f"Generating single question: type={question_type}, difficulty={difficulty}, selected_documents={selected_documents}")
-        context = self.get_aggregated_context(selected_documents=selected_documents)
-        logging.info(f"Aggregated context length: {len(context)}")
-        if not context:
-            error_message = "No context found. The knowledge base is empty or retriever failed. Please upload documents."
-            logging.info(error_message)
-            return self._generate_fallback_question(question_type, difficulty, error_message=error_message)
-        if difficulty == "adaptive":
-            logging.warning("Adaptive difficulty is not implemented. Returning fallback question.")
-            return self._generate_fallback_question(question_type, difficulty, error_message="Adaptive difficulty is not implemented. Please select easy, medium, or hard.")
-        if question_type == "multiple_choice":
-            q = self._generate_multiple_choice(context, difficulty)
-        elif question_type == "true_false":
-            q = self._generate_true_false(context, difficulty)
-        elif question_type == "short_answer":
-            q = self._generate_short_answer(context, difficulty)
-        else:
-            q = self._generate_multiple_choice(context, difficulty)
-        logging.info(f"Generated question: {q.get('question', str(q))[:100]}")
-        return self._post_process_question(q, question_type)
-
-    def generate_question_from_context(self, context: str, question_type: str = "multiple_choice", difficulty: str = "medium") -> Dict[str, Any]:
-        import logging
-        logging.info(f"Generating question from provided context. Type={question_type}, Difficulty={difficulty}")
-        if not context:
-            error_message = "No context provided. The knowledge base is empty or retriever failed. Please upload documents."
-            logging.info(error_message)
-            return self._generate_fallback_question(question_type, difficulty, error_message=error_message)
-        if difficulty == "adaptive":
-            logging.warning("Adaptive difficulty is not implemented. Returning fallback question.")
-            return self._generate_fallback_question(question_type, difficulty, error_message="Adaptive difficulty is not implemented. Please select easy, medium, or hard.")
-        if question_type == "multiple_choice":
-            q = self._generate_multiple_choice(context, difficulty)
-        elif question_type == "true_false":
-            q = self._generate_true_false(context, difficulty)
-        elif question_type == "short_answer":
-            q = self._generate_short_answer(context, difficulty)
-        else:
-            q = self._generate_multiple_choice(context, difficulty)
-        logging.info(f"Generated question from context: {q.get('question', str(q))[:100]}")
-        return self._post_process_question(q, question_type)
-
     def generate_questions_batch_from_context(self, context: str, num_questions: int, question_type: str = "multiple_choice", difficulty: str = "medium") -> list:
         import logging
         logging.info(f"Generating batch of {num_questions} questions: type={question_type}, difficulty={difficulty}")
@@ -174,47 +130,6 @@ class QuizAgent:
             logging.error(f"Error during batch question generation: {e}")
             error_message = f"Error during batch question generation: {e}"
             return [self._generate_fallback_question(question_type, difficulty, error_message=error_message)] * num_questions
-
-    def _generate_multiple_choice(self, context: str, difficulty: str) -> Dict[str, Any]:
-        try:
-            prompt = quiz_prompt.format(
-                context=context,
-                difficulty=difficulty,
-                num_questions=1,
-                question_type="multiple_choice",
-                user_message=""
-            )
-            answer = self.llm_provider.completion(prompt=prompt, temperature=0.7, max_tokens=1000)
-            return self._extract_json_from_response(answer)
-        except Exception as e:
-            return {
-                "question": f"LLM error: {e}",
-                "options": [],
-                "correct_answer": "",
-                "explanation": "",
-                "source": "",
-                "difficulty": difficulty
-            }
-
-    def _generate_true_false(self, context: str, difficulty: str) -> Dict[str, Any]:
-        prompt = f"Based on the following text, create a {difficulty} level true/false question.\nContext: {context}"
-        answer = self.llm_provider.completion(prompt=prompt, temperature=0.7, max_tokens=1000)
-        return self._extract_json_from_response(answer)
-
-    def _generate_short_answer(self, context: str, difficulty: str) -> Dict[str, Any]:
-        prompt = f"Based on the following text, create a {difficulty} level short answer question.\nContext: {context}"
-        answer = self.llm_provider.completion(prompt=prompt, temperature=0.7, max_tokens=1000)
-        return self._extract_json_from_response(answer)
-
-    def _extract_json_from_response(self, response: str) -> Dict[str, Any]:
-        if "```json" in response and "```" in response:
-            json_match = re.search(r'```json\s*\n?(.*?)\n?```', response, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group(1).strip())
-        try:
-            return json.loads(response.strip())
-        except Exception:
-            return {"question": response.strip()}
 
     def _normalize_answer(self, answer: str) -> str:
         # Remove leading option letter (e.g., 'A)', 'B)') and punctuation, lower, strip

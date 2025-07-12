@@ -129,6 +129,20 @@ knowledge-quiz-chatbot/
 - **UI**: Modular Streamlit UI in `ui/`.
 - **Testing**: Comprehensive unit and integration tests in `tests/`.
 
+## Screenshots
+
+### Chat Interface
+![Chat Interface](screenshots/screencapture-chat.png)
+
+### Document Management
+![Document Management](screenshots/screencapture-documents.png)
+
+### Quiz Mode
+![Quiz Mode](screenshots/screencapture-quiz.png)
+
+### Settings Page
+![Settings Page](screenshots/screencapture-settings.png)
+
 ## 🗺️ Roadmap
 
 - [ ] Multi-language support

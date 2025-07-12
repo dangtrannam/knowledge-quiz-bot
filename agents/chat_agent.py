@@ -77,8 +77,7 @@ class ChatAgent:
             logging.info(f"Messages: {messages}")
             answer = self.llm_provider.chat(
                 messages=messages,
-                temperature=0.7,
-                max_tokens=1000
+                temperature=0.7
             )
             return {'success': True, 'response': answer, 'sources': list(sources)}
         except Exception as e:

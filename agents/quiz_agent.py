@@ -93,7 +93,7 @@ class QuizAgent:
         )
         try:
             logging.info("Calling LLM for batch question generation.")
-            answer = self.llm_provider.completion(prompt=prompt, temperature=0.7, max_tokens=3000)
+            answer = self.llm_provider.completion(prompt=prompt, temperature=0.7)
             import re
             questions = []
             # Extract JSON between <result>...</result> tags if present

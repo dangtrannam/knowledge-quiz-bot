@@ -159,6 +159,12 @@ knowledge-quiz-chatbot/
 - **LangChain**: Powerful framework for building LLM applications
 - **Streamlit**: Excellent platform for creating ML web applications
 - **OpenAI**: Advanced language models that power the question generation
+- **LiteLLM**: Effortless multi-provider LLM integration, making it easy to switch and scale across AI providers
+- **ChromaDB**: Lightning-fast, open-source vector database for semantic search and retrieval
+- **nomic-embed**: High-quality, open-source embedding models for robust vector representations
+- **Qwen3 Model**: Next-generation open LLM from Alibaba, enabling advanced reasoning and multilingual capabilities
+
+> 🚀 Special thanks to the open-source community for their relentless innovation and generosity. This project stands on the shoulders of giants!
 
 ## 📞 Support
 - **Issues**: [GitHub Issues](https://github.com/dangtrannam/knowledge-quiz-bot/issues)
